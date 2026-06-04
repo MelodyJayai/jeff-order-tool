@@ -19,6 +19,9 @@
 
 # production
 /build
+/release
+/data/*.db
+/data/*.db-*
 
 # misc
 .DS_Store
@@ -29,6 +32,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+/logs
+*.log
 
 # env files (can opt-in for committing if needed)
 .env*

@@ -1,36 +1,139 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Jeff 制衣订单核销工具
 
-## Getting Started
+V1 聚焦 Jeff 的 2026-06-02 和 2026-06-03 反馈：订单号登记、自动登记日期、输入订单号查询、出货核销自动日期、按细分类登记数量、部分交付、急单置顶、电脑和手机浏览器访问。
 
-First, run the development server:
+数据长期保存在同一张订单总表里，不按月份拆分。
+
+## 开源说明
+
+这个项目面向小型制衣厂、加工厂、档口和类似场景：用一个轻量工具替代纸本翻找订单号、手工划线核销和临时 Excel。
+
+仓库只包含程序源码，不包含真实订单数据。实际使用时生成的 `data/orders.db`、绿色版 `release` 目录和日志文件都不会提交到 Git。
+
+## 登记和订单总表
+
+电脑端登记时输入一个订单号、细分类数量和可选备注，然后点“保存到订单总表”。
+
+保存后订单会一直留在订单总表里，后续直接输入订单号查找和核销。
+
+## 细分类数量
+
+登记时填写这些细分类数量：
+
+- 套装
+- 单衫
+- 单裤
+- 马甲
+- 大衣
+
+工具只记录数量和出货核销，不计算价格。
+
+## 手机模式
+
+手机窄屏会自动进入手机模式，可以搜索、查看详情、查看急单和出货核销。
+
+登记、修改详情、撤销核销只在电脑端显示。
+
+## 办公室手机扫码访问
+
+电脑端打开工具后，左侧会显示“手机访问”二维码。
+
+手机连接办公室同一个 Wi-Fi 后，用相机扫码即可打开同一份订单总表。扫码打不开时，可以复制二维码下面的局域网地址，在手机浏览器里打开。
+
+Windows 防火墙如果提示 Node.js 或 Jeff 订单工具需要访问网络，选择允许专用网络访问。
+
+## 本地运行
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+打开：
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```text
+http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+如果要让同一 Wi-Fi 下的手机访问，可以运行：
 
-## Learn More
+```bash
+npm run dev:lan
+```
 
-To learn more about Next.js, take a look at the following resources:
+然后用手机访问电脑的局域网 IP，例如：
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```text
+http://电脑IP:3000
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Windows 11 可以直接双击：
 
-## Deploy on Vercel
+```text
+start-jeff-order-tool.cmd
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+它会启动服务并打开本机页面。
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Windows 绿色版
+
+生成免安装版：
+
+```bash
+npm run build:desktop
+```
+
+生成目录：
+
+```text
+release/JeffOrderTool
+```
+
+发给 Jeff 时可以把整个 `JeffOrderTool` 文件夹打包给他。Jeff 只需要双击：
+
+```text
+打开Jeff订单工具.exe
+```
+
+工具会自动启动后台服务并打开浏览器。用完可以直接关闭浏览器；如果要关闭后台服务，可以打开 `SupportFiles` 文件夹并双击：
+
+```text
+CloseJeffOrderTool.exe
+```
+
+绿色版的数据保存在 `release/JeffOrderTool/data`，后续升级或云端迁移时复制这个 `data` 文件夹即可。
+
+如果 Jeff 的电脑提示启动超时，查看绿色版目录下的 `logs/server.log`。这个文件会记录后台服务启动失败的具体原因。
+
+给 Jeff 更新新版时，先删除旧的 `JeffOrderTool` 文件夹，再解压新的 zip，避免旧版本的关闭程序残留在根目录。
+
+## 数据文件
+
+SQLite 数据库会自动创建在：
+
+```text
+data/orders.db
+```
+
+这个文件就是本地数据，已经加入 `.gitignore`。备份时复制 `data` 目录即可。
+
+## 后续云端兼容
+
+当前版本的数据结构按“先本地试用，后续可迁移云端”设计：
+
+- 订单使用稳定的内部 ID 和唯一订单号。
+- 日期字段统一保存为文本日期，方便导入云端数据库。
+- 细分类数量、核销状态、急单等级都是结构化字段。
+- 数据库会记录 `schema_version` 和 `schema_migrations`，后续版本可以识别旧数据并自动升级。
+
+将来迁移云端时，优先复制完整 `data` 目录，再由迁移脚本导入云端数据库。
+
+## 检查命令
+
+```bash
+npm run lint
+npm run build
+```
+
+## 许可证
+
+MIT
