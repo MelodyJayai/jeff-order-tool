@@ -1,6 +1,6 @@
 import { Workbench } from "@/app/components/workbench";
 import { chinaToday } from "@/lib/date";
-import { listOrders } from "@/lib/db";
+import { listOrderEvents, listOrders } from "@/lib/db";
 import { getLanAccessUrls } from "@/lib/network";
 import QRCode from "qrcode";
 
@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const orders = listOrders();
+  const events = listOrderEvents();
   const urls = getLanAccessUrls();
   const primaryUrl = urls[0] ?? null;
   const qrDataUrl = primaryUrl
@@ -20,6 +21,7 @@ export default async function Home() {
 
   return (
     <Workbench
+      initialEvents={events}
       initialOrders={orders}
       phoneAccess={{ primaryUrl, qrDataUrl, urls }}
       today={chinaToday()}

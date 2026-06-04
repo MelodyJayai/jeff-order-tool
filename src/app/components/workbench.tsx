@@ -7,12 +7,14 @@ import {
   Copy,
   FileDown,
   Flame,
+  History,
   ListChecks,
   Plus,
   RotateCcw,
   Save,
   Search,
   Smartphone,
+  Upload,
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -21,6 +23,7 @@ import { useMemo, useState, useSyncExternalStore } from "react";
 
 import {
   createOrdersAction,
+  importCsvAction,
   undoWriteOffOrderAction,
   updateOrderAction,
   writeOffOrderAction,
@@ -33,6 +36,7 @@ import {
 import { formatDateTime } from "@/lib/date";
 import {
   type ActionResult,
+  type OrderEventRecord,
   type OrderRecord,
   type OrderStatus,
   type UrgencyLevel,
@@ -41,6 +45,7 @@ import {
 } from "@/lib/types";
 
 type WorkbenchProps = {
+  initialEvents: OrderEventRecord[];
   initialOrders: OrderRecord[];
   phoneAccess: PhoneAccess;
   today: string;
@@ -74,6 +79,14 @@ const urgencyTone: Record<UrgencyLevel, string> = {
   URGENT: "border-amber-200 bg-amber-50 text-amber-800",
   VERY_URGENT: "border-red-200 bg-red-50 text-red-800",
 };
+
+const eventLabels = {
+  CREATED: "登记",
+  UPDATED: "更新",
+  PARTIAL: "部分交付",
+  WRITTEN_OFF: "出货核销",
+  UNDO_WRITTEN_OFF: "撤销核销",
+} as const;
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -292,6 +305,98 @@ function PhoneAccessCard({ access }: { access: PhoneAccess }) {
   );
 }
 
+function ImportBackupCard({
+  busy,
+  onSubmit,
+}: {
+  busy: string | null;
+  onSubmit: (
+    event: FormEvent<HTMLFormElement>,
+    action: ServerAction,
+    busyLabel: string,
+    reset?: boolean,
+  ) => Promise<void>;
+}) {
+  return (
+    <section className="hidden rounded-md border border-zinc-200 bg-white md:block">
+      <div className="flex h-12 items-center gap-2 border-b border-zinc-200 px-4 text-sm font-semibold">
+        <FileDown className="h-4 w-4" aria-hidden="true" />
+        数据工具
+      </div>
+      <div className="grid gap-3 p-4">
+        <a
+          href="/api/backup"
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-medium text-zinc-900 transition hover:bg-zinc-50"
+        >
+          <FileDown className="h-4 w-4" aria-hidden="true" />
+          下载数据库备份
+        </a>
+        <form
+          onSubmit={(event) => onSubmit(event, importCsvAction, "导入", true)}
+          className="grid gap-2 border-t border-zinc-100 pt-3"
+        >
+          <Field label="导入 CSV">
+            <input
+              name="csvFile"
+              type="file"
+              accept=".csv,text/csv"
+              className="block w-full text-sm text-zinc-700 file:mr-3 file:h-9 file:rounded-md file:border-0 file:bg-zinc-950 file:px-3 file:text-sm file:font-medium file:text-white"
+              required
+            />
+          </Field>
+          <button
+            type="submit"
+            disabled={Boolean(busy)}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-medium text-zinc-900 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+            title="导入 CSV"
+          >
+            <Upload className="h-4 w-4" aria-hidden="true" />
+            {busy === "导入" ? "导入中" : "导入订单"}
+          </button>
+        </form>
+      </div>
+    </section>
+  );
+}
+
+function EventLogCard({ events }: { events: OrderEventRecord[] }) {
+  return (
+    <section className="rounded-md border border-zinc-200 bg-white">
+      <div className="flex h-12 items-center gap-2 border-b border-zinc-200 px-4 text-sm font-semibold">
+        <History className="h-4 w-4" aria-hidden="true" />
+        最近操作
+      </div>
+      <div className="max-h-72 overflow-auto">
+        {events.length > 0 ? (
+          events.slice(0, 20).map((event) => (
+            <div
+              key={event.id}
+              className="grid gap-1 border-b border-zinc-100 px-4 py-3 text-sm"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-medium text-zinc-950">
+                  {event.orderCode || "未知订单"}
+                </span>
+                <span className="text-xs text-zinc-500">
+                  {eventLabels[event.type]}
+                </span>
+              </div>
+              <div className="text-xs text-zinc-500">
+                {formatDateTime(event.createdAt)}
+              </div>
+              {event.detail ? (
+                <div className="text-xs text-zinc-600">{event.detail}</div>
+              ) : null}
+            </div>
+          ))
+        ) : (
+          <div className="px-4 py-6 text-sm text-zinc-500">暂无</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function OrderRow({
   order,
   active,
@@ -481,6 +586,7 @@ function MobileDetail({
 }
 
 export function Workbench({
+  initialEvents,
   initialOrders,
   phoneAccess,
   today,
@@ -850,6 +956,10 @@ export function Workbench({
 
             {!isPhoneMode ? <PhoneAccessCard access={phoneAccess} /> : null}
 
+            {!isPhoneMode ? (
+              <ImportBackupCard busy={busy} onSubmit={submit} />
+            ) : null}
+
             <section className="rounded-md border border-zinc-200 bg-white">
               <div className="flex h-12 items-center gap-2 border-b border-zinc-200 px-4 text-sm font-semibold">
                 <AlertTriangle className="h-4 w-4 text-red-600" />
@@ -891,6 +1001,8 @@ export function Workbench({
                 )}
               </div>
             </section>
+
+            <EventLogCard events={initialEvents} />
           </div>
 
           <div className="order-first grid content-start gap-4 lg:order-none">
@@ -1047,12 +1159,16 @@ export function Workbench({
                       </div>
                       <button
                         type="submit"
-                        disabled={Boolean(busy)}
+                        disabled={
+                          Boolean(busy) || selected.status === "WRITTEN_OFF"
+                        }
                         className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-300"
                         title="出货核销"
                       >
                         <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                        {busy === "核销" ? "核销中" : "出货核销"}
+                        {busy === "核销"
+                          ? "核销中"
+                          : writeOffLabel(selected.status)}
                       </button>
                     </form>
                     <form

@@ -20,8 +20,7 @@
 # production
 /build
 /release
-/data/*.db
-/data/*.db-*
+/data/
 
 # misc
 .DS_Store

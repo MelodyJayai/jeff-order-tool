@@ -33,6 +33,15 @@ export type OrderRecord = {
   updatedAt: string;
 };
 
+export type OrderEventRecord = {
+  id: string;
+  orderId: string;
+  orderCode: string;
+  type: OrderEventType;
+  detail: string;
+  createdAt: string;
+};
+
 export type CreateOrdersInput = {
   codes: string[];
   customerName: string;
@@ -45,6 +54,15 @@ export type CreateOrdersInput = {
   registeredAt: string;
   urgency: UrgencyLevel;
   note: string;
+};
+
+export type ImportOrderInput = CreateOrdersInput & {
+  code: string;
+  status: OrderStatus;
+  writtenOffAt: string | null;
+  partialQuantity: number | null;
+  partialDate: string | null;
+  partialNote: string;
 };
 
 export type UpdateOrderInput = {
@@ -68,6 +86,12 @@ export type ActionResult = {
   ok: boolean;
   message: string;
   skipped?: string[];
+};
+
+export type ImportOrdersResult = {
+  created: number;
+  updated: number;
+  skipped: string[];
 };
 
 export const statusLabels: Record<OrderStatus, string> = {

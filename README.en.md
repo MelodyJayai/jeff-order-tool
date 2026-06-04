@@ -39,6 +39,9 @@ This repository contains only the application source code. Real order data, loca
 - Urgency levels.
 - Partial delivery quantity/date/note fields.
 - CSV export.
+- CSV import with order-number based update/insert.
+- Operation log for registration, updates, partial delivery, write-off, and undo.
+- Consistent SQLite backup download.
 - Mobile mode for search, viewing, urgent orders, and shipment write-off.
 - Desktop-only registration and detail editing.
 - Local Wi-Fi phone access QR code.
@@ -62,6 +65,18 @@ The database is designed with future migration in mind:
 - The database records `schema_version` and `schema_migrations`.
 
 If the tool is later moved to a cloud server, the recommended migration source is the complete `data` directory, not only a single `orders.db` file. SQLite may also use `orders.db-wal` and `orders.db-shm` while running.
+
+Export PostgreSQL import SQL:
+
+```bash
+npm run export:postgres
+```
+
+Default output:
+
+```text
+data/jeff-order-postgres-import.sql
+```
 
 ## Development
 
@@ -158,6 +173,16 @@ If the phone cannot connect, check:
 - The computer is awake and connected to the network.
 
 This is local network access. It is not a public cloud deployment.
+
+## Data Tools
+
+The desktop UI includes a data tools card:
+
+- Download a consistent SQLite backup.
+- Import CSV rows. Existing order numbers are updated; new order numbers are created.
+- View recent operation logs.
+
+Duplicate shipment write-off is also blocked on the server side, so repeated clicks do not create repeated write-off records.
 
 ## Build And Check
 

@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import {
@@ -10,7 +11,10 @@ import {
 import { nowIso } from "@/lib/date";
 import type {
   CreateOrdersInput,
+  ImportOrderInput,
+  ImportOrdersResult,
   OrderEventType,
+  OrderEventRecord,
   OrderRecord,
   OrderStatus,
   UpdateOrderInput,
@@ -39,6 +43,15 @@ type OrderRow = {
   note: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type OrderEventRow = {
+  id: string;
+  order_id: string;
+  order_code: string | null;
+  type: string;
+  detail: string | null;
+  created_at: string;
 };
 
 const globalForDb = globalThis as typeof globalThis & {
@@ -266,6 +279,30 @@ function insertEvent(
   });
 }
 
+function toEventType(value: string): OrderEventType {
+  if (
+    value === "UPDATED" ||
+    value === "PARTIAL" ||
+    value === "WRITTEN_OFF" ||
+    value === "UNDO_WRITTEN_OFF"
+  ) {
+    return value;
+  }
+
+  return "CREATED";
+}
+
+function mapEvent(row: OrderEventRow): OrderEventRecord {
+  return {
+    id: row.id,
+    orderId: row.order_id,
+    orderCode: row.order_code ?? "",
+    type: toEventType(row.type),
+    detail: row.detail ?? "",
+    createdAt: row.created_at,
+  };
+}
+
 export function listOrders() {
   const db = getDb();
   const rows = db
@@ -276,6 +313,39 @@ export function listOrders() {
     .all() as OrderRow[];
 
   return rows.map(mapOrder);
+}
+
+export async function createDatabaseBackup() {
+  const db = getDb();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "jeff-order-backup-"));
+  const backupPath = path.join(tempDir, "orders-backup.db");
+
+  try {
+    await db.backup(backupPath);
+    return fs.readFileSync(backupPath);
+  } finally {
+    fs.rmSync(tempDir, { force: true, recursive: true });
+  }
+}
+
+export function listOrderEvents(limit = 80) {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT e.id,
+              e.order_id,
+              o.code AS order_code,
+              e.type,
+              e.detail,
+              e.created_at
+       FROM order_events e
+       LEFT JOIN orders o ON o.id = e.order_id
+       ORDER BY e.created_at DESC
+       LIMIT ?`,
+    )
+    .all(limit) as OrderEventRow[];
+
+  return rows.map(mapEvent);
 }
 
 export function getOrder(id: string) {
@@ -339,6 +409,99 @@ export function createOrders(input: CreateOrdersInput) {
     }
 
     return { created, skipped };
+  })();
+}
+
+export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
+  const db = getDb();
+
+  return db.transaction(() => {
+    const now = nowIso();
+    const skipped: string[] = [];
+    let created = 0;
+    let updated = 0;
+
+    const exists = db.prepare(
+      "SELECT id FROM orders WHERE code = ? COLLATE NOCASE LIMIT 1",
+    );
+    const insert = db.prepare(`
+      INSERT INTO orders (
+        id, code, customer_name, quantity,
+        suit_quantity, jacket_quantity, pant_quantity, vest_quantity,
+        coat_quantity, registered_at, status, written_off_at, urgency,
+        partial_quantity, partial_date, partial_note, note,
+        created_at, updated_at
+      )
+      VALUES (
+        @id, @code, @customerName, @quantity,
+        @suitQuantity, @jacketQuantity, @pantQuantity, @vestQuantity,
+        @coatQuantity, @registeredAt, @status, @writtenOffAt, @urgency,
+        @partialQuantity, @partialDate, @partialNote, @note,
+        @createdAt, @updatedAt
+      )
+    `);
+    const update = db.prepare(`
+      UPDATE orders
+      SET customer_name = @customerName,
+          quantity = @quantity,
+          suit_quantity = @suitQuantity,
+          jacket_quantity = @jacketQuantity,
+          pant_quantity = @pantQuantity,
+          vest_quantity = @vestQuantity,
+          coat_quantity = @coatQuantity,
+          registered_at = @registeredAt,
+          status = @status,
+          written_off_at = @writtenOffAt,
+          urgency = @urgency,
+          partial_quantity = @partialQuantity,
+          partial_date = @partialDate,
+          partial_note = @partialNote,
+          note = @note,
+          updated_at = @updatedAt
+      WHERE id = @id
+    `);
+
+    for (const item of input) {
+      const code = item.code.trim();
+
+      if (!code) {
+        skipped.push("(空订单号)");
+        continue;
+      }
+
+      const quantities = productValues(item);
+      const quantity = totalQuantity(quantities, item.quantity);
+      const current = exists.get(code) as { id: string } | undefined;
+      const values = {
+        id: current?.id ?? randomUUID(),
+        code,
+        customerName: item.customerName || null,
+        quantity,
+        ...quantities,
+        registeredAt: item.registeredAt,
+        status: item.status,
+        writtenOffAt: item.status === "WRITTEN_OFF" ? item.writtenOffAt : null,
+        urgency: item.urgency,
+        partialQuantity: item.partialQuantity,
+        partialDate: item.partialDate,
+        partialNote: item.partialNote || null,
+        note: item.note || null,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      if (current) {
+        update.run(values);
+        insertEvent(db, current.id, "UPDATED", `导入更新 ${code}`);
+        updated += 1;
+      } else {
+        insert.run(values);
+        insertEvent(db, values.id, "CREATED", `导入订单 ${code}`);
+        created += 1;
+      }
+    }
+
+    return { created, updated, skipped };
   })();
 }
 
@@ -413,11 +576,15 @@ export function writeOffOrder(id: string, writtenOffAt: string) {
   const current = getOrder(id);
 
   if (!current) {
-    return false;
+    return "missing" as const;
   }
 
-  db.transaction(() => {
-    db.prepare(`
+  if (current.status === "WRITTEN_OFF") {
+    return "already" as const;
+  }
+
+  const updated = db.transaction(() => {
+    const result = db.prepare(`
       UPDATE orders
       SET status = 'WRITTEN_OFF',
           written_off_at = @writtenOffAt,
@@ -428,10 +595,16 @@ export function writeOffOrder(id: string, writtenOffAt: string) {
       writtenOffAt,
       updatedAt: nowIso(),
     });
+
+    if (result.changes === 0) {
+      return false;
+    }
+
     insertEvent(db, id, "WRITTEN_OFF", `出货日期 ${writtenOffAt}`);
+    return true;
   })();
 
-  return true;
+  return updated ? ("updated" as const) : ("already" as const);
 }
 
 export function undoWriteOffOrder(id: string) {
