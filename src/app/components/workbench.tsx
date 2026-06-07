@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  Activity,
   AlertTriangle,
+  ArrowRight,
   CheckCircle2,
   Clock3,
   Copy,
@@ -9,6 +11,7 @@ import {
   Flame,
   History,
   ListChecks,
+  LogOut,
   Plus,
   RotateCcw,
   Save,
@@ -19,20 +22,24 @@ import {
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import {
   createOrdersAction,
   importCsvAction,
+  installUpdateAction,
+  markReturnedOrderAction,
   undoWriteOffOrderAction,
   updateOrderAction,
   writeOffOrderAction,
 } from "@/app/actions";
+import { logoutAction } from "@/app/auth-actions";
 import {
   PRODUCT_COLUMNS,
   calculateTotalQuantity,
   productSummary,
 } from "@/lib/catalog";
+import { COMPANY_OPTIONS, FACTORY_OPTIONS } from "@/lib/companies";
 import { formatDateTime } from "@/lib/date";
 import {
   type ActionResult,
@@ -60,6 +67,18 @@ type PhoneAccess = {
 type ServerAction = (formData: FormData) => Promise<ActionResult>;
 type StatusFilter = "ALL" | "OPEN" | OrderStatus;
 type UrgencyFilter = "ALL" | UrgencyLevel;
+type CompanyFilter = "ALL" | "UNASSIGNED" | string;
+type FactoryFilter = "ALL" | "UNASSIGNED" | string;
+type UpdateState = {
+  ok: boolean;
+  currentVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  assetName: string | null;
+  downloadUrl: string | null;
+  releaseUrl: string | null;
+  message: string;
+};
 const MOBILE_QUERY = "(max-width: 767px)";
 
 const urgencyWeight: Record<UrgencyLevel, number> = {
@@ -71,6 +90,7 @@ const urgencyWeight: Record<UrgencyLevel, number> = {
 const statusTone: Record<OrderStatus, string> = {
   PENDING: "border-zinc-200 bg-zinc-100 text-zinc-700",
   PARTIAL: "border-cyan-200 bg-cyan-50 text-cyan-800",
+  RETURNED: "border-violet-200 bg-violet-50 text-violet-800",
   WRITTEN_OFF: "border-emerald-200 bg-emerald-50 text-emerald-800",
 };
 
@@ -84,8 +104,18 @@ const eventLabels = {
   CREATED: "登记",
   UPDATED: "更新",
   PARTIAL: "部分交付",
+  RETURNED: "返厂修改",
   WRITTEN_OFF: "出货核销",
+  RETURN_RESOLVED: "完成返厂",
   UNDO_WRITTEN_OFF: "撤销核销",
+} as const;
+
+const returnQuantityKeys = {
+  suitQuantity: "returnSuitQuantity",
+  jacketQuantity: "returnJacketQuantity",
+  pantQuantity: "returnPantQuantity",
+  vestQuantity: "returnVestQuantity",
+  coatQuantity: "returnCoatQuantity",
 } as const;
 
 function cn(...classes: Array<string | false | null | undefined>) {
@@ -115,11 +145,32 @@ function usePhoneMode() {
 }
 
 function writeOffLabel(status: OrderStatus) {
+  if (status === "RETURNED") {
+    return "完成返厂";
+  }
+
   return status === "WRITTEN_OFF" ? "已出货" : "出货核销";
 }
 
 function dateText(value: string | null) {
   return value || "-";
+}
+
+function blankText(value: string, fallback = "未选择") {
+  return value.trim() || fallback;
+}
+
+function mergedOptions(
+  configured: readonly string[],
+  values: string[],
+) {
+  return Array.from(
+    new Set(
+      [...configured, ...values]
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 function quantityValues(order: OrderRecord) {
@@ -137,6 +188,18 @@ function orderQuantity(order: OrderRecord) {
   return categoryTotal > 0 ? categoryTotal : order.quantity;
 }
 
+function returnSummary(order: OrderRecord) {
+  return PRODUCT_COLUMNS.filter(
+    (item) => order[returnQuantityKeys[item.key]] > 0,
+  )
+    .map((item) => `${item.label}${order[returnQuantityKeys[item.key]]}`)
+    .join(" ");
+}
+
+function returnSummaryLabel(order: OrderRecord) {
+  return order.status === "RETURNED" ? "返厂数量" : "曾返厂";
+}
+
 function orderMatches(order: OrderRecord, query: string) {
   const q = query.trim().toLowerCase();
 
@@ -146,6 +209,8 @@ function orderMatches(order: OrderRecord, query: string) {
 
   return [
     order.code,
+    order.companyName,
+    order.factoryName,
     order.customerName,
     order.note,
     order.partialNote,
@@ -156,12 +221,59 @@ function sortByUrgency(a: OrderRecord, b: OrderRecord) {
   return (
     urgencyWeight[a.urgency] - urgencyWeight[b.urgency] ||
     a.registeredAt.localeCompare(b.registeredAt) ||
-    b.updatedAt.localeCompare(a.updatedAt)
+    a.createdAt.localeCompare(b.createdAt)
   );
+}
+
+function orderTextTone(order: OrderRecord) {
+  if (order.status === "RETURNED") {
+    return "text-violet-700";
+  }
+
+  if (order.status === "WRITTEN_OFF") {
+    return "text-emerald-700";
+  }
+
+  if (order.urgency === "VERY_URGENT") {
+    return "text-red-700";
+  }
+
+  if (order.urgency === "URGENT") {
+    return "text-amber-700";
+  }
+
+  return "text-zinc-950";
+}
+
+function orderSubTextTone(order: OrderRecord) {
+  if (order.status === "RETURNED") {
+    return "text-violet-600";
+  }
+
+  if (order.status === "WRITTEN_OFF") {
+    return "text-emerald-600";
+  }
+
+  if (order.urgency === "VERY_URGENT") {
+    return "text-red-600";
+  }
+
+  if (order.urgency === "URGENT") {
+    return "text-amber-600";
+  }
+
+  return "text-zinc-500";
 }
 
 function fieldClass() {
   return "h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-950 outline-none transition focus:border-zinc-950 focus:ring-2 focus:ring-zinc-200";
+}
+
+function tableInputClass(extra = "") {
+  return cn(
+    "h-10 w-full border-0 bg-white px-2 text-sm text-zinc-950 outline-none transition focus:bg-zinc-50 focus:ring-2 focus:ring-inset focus:ring-zinc-300",
+    extra,
+  );
 }
 
 function textareaClass() {
@@ -183,6 +295,36 @@ function Field({
   );
 }
 
+function OptionSelect({
+  name,
+  options,
+  placeholder,
+  required,
+  value,
+}: {
+  name: string;
+  options: string[];
+  placeholder: string;
+  required?: boolean;
+  value?: string;
+}) {
+  return (
+    <select
+      name={name}
+      defaultValue={value ?? ""}
+      required={required}
+      className={fieldClass()}
+    >
+      <option value="">{placeholder}</option>
+      {options.map((item) => (
+        <option key={item} value={item}>
+          {item}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function Badge({
   children,
   className,
@@ -199,6 +341,90 @@ function Badge({
     >
       {children}
     </span>
+  );
+}
+
+function ReturnOrderForm({
+  busy,
+  onSubmit,
+  order,
+  today,
+}: {
+  busy: string | null;
+  onSubmit: (
+    event: FormEvent<HTMLFormElement>,
+    action: ServerAction,
+    busyLabel: string,
+    reset?: boolean,
+  ) => Promise<void>;
+  order: OrderRecord;
+  today: string;
+}) {
+  const isEditing = order.status === "RETURNED";
+  const hasCategoryQuantities = calculateTotalQuantity(quantityValues(order)) > 0;
+
+  return (
+    <form
+      onSubmit={(event) => onSubmit(event, markReturnedOrderAction, "返厂")}
+      className="grid gap-3 rounded-md border border-violet-200 bg-violet-50 p-3"
+    >
+      <input type="hidden" name="id" value={order.id} />
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold text-violet-900">
+          {isEditing ? "更新返厂记录" : "返厂修改"}
+        </div>
+        <div className="text-xs font-medium text-violet-700">
+          返厂日期 {today}
+        </div>
+      </div>
+      <input type="hidden" name="returnedAt" value={today} />
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {PRODUCT_COLUMNS.map((item) => {
+          const maxQuantity = hasCategoryQuantities
+            ? order[item.key]
+            : order.quantity;
+          const defaultQuantity = isEditing
+            ? order[returnQuantityKeys[item.key]]
+            : 0;
+
+          return (
+            <Field key={item.key} label={`${item.label}（原${maxQuantity}）`}>
+              <input
+                name={returnQuantityKeys[item.key]}
+                type="number"
+                min={0}
+                max={maxQuantity}
+                inputMode="numeric"
+                defaultValue={defaultQuantity}
+                className={fieldClass()}
+              />
+            </Field>
+          );
+        })}
+      </div>
+      <Field label="返厂备注">
+        <textarea
+          name="returnNote"
+          rows={2}
+          className={textareaClass()}
+          defaultValue={isEditing ? order.returnNote : ""}
+          placeholder="例如：客人改腰、改单衫袖长"
+        />
+      </Field>
+      <button
+        type="submit"
+        disabled={Boolean(busy)}
+        className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-violet-700 px-4 text-sm font-medium text-white transition hover:bg-violet-800 disabled:cursor-not-allowed disabled:bg-violet-300"
+        title={isEditing ? "更新返厂记录" : "标记返厂修改"}
+      >
+        <RotateCcw className="h-4 w-4" aria-hidden="true" />
+        {busy === "返厂"
+          ? "保存中"
+          : isEditing
+            ? "更新返厂记录"
+            : "标记返厂修改"}
+      </button>
+    </form>
   );
 }
 
@@ -232,10 +458,10 @@ function PhoneAccessCard({ access }: { access: PhoneAccess }) {
       <section className="hidden rounded-md border border-zinc-200 bg-white md:block">
         <div className="flex h-12 items-center gap-2 border-b border-zinc-200 px-4 text-sm font-semibold">
           <Smartphone className="h-4 w-4" aria-hidden="true" />
-          手机访问
+          手机/其他电脑访问
         </div>
         <div className="p-4 text-sm text-zinc-500">
-          未检测到办公室 Wi-Fi 地址。
+          未检测到办公室局域网地址。
         </div>
       </section>
     );
@@ -255,7 +481,7 @@ function PhoneAccessCard({ access }: { access: PhoneAccess }) {
     <section className="hidden rounded-md border border-zinc-200 bg-white md:block">
       <div className="flex h-12 items-center gap-2 border-b border-zinc-200 px-4 text-sm font-semibold">
         <Smartphone className="h-4 w-4" aria-hidden="true" />
-        手机访问
+        手机/其他电脑访问
       </div>
       <div className="grid gap-3 p-4">
         {access.qrDataUrl ? (
@@ -283,7 +509,7 @@ function PhoneAccessCard({ access }: { access: PhoneAccess }) {
           {copied ? "已复制" : "复制地址"}
         </button>
         <div className="text-xs leading-5 text-zinc-500">
-          手机和电脑连同一个 Wi-Fi，扫码打开。
+          只在一台电脑上双击打开工具；手机或另一台电脑连同一个 Wi-Fi 后，用这个地址访问，数据会写入同一份总表。
         </div>
         {otherUrls.length > 0 ? (
           <div className="grid gap-1 border-t border-zinc-100 pt-2 text-xs text-zinc-500">
@@ -359,12 +585,140 @@ function ImportBackupCard({
   );
 }
 
+function UpdateCard({
+  busy,
+  onSubmit,
+}: {
+  busy: string | null;
+  onSubmit: (
+    event: FormEvent<HTMLFormElement>,
+    action: ServerAction,
+    busyLabel: string,
+    reset?: boolean,
+  ) => Promise<void>;
+}) {
+  const [update, setUpdate] = useState<UpdateState | null>(null);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function check() {
+      try {
+        const response = await fetch("/api/update", {
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+        const data = (await response.json()) as UpdateState;
+
+        if (!cancelled) {
+          setUpdate(data);
+        }
+      } catch {
+        if (!cancelled) {
+          setUpdate({
+            ok: false,
+            currentVersion: "",
+            latestVersion: null,
+            updateAvailable: false,
+            assetName: null,
+            downloadUrl: null,
+            releaseUrl: null,
+            message: "暂时无法检查更新",
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setChecking(false);
+        }
+      }
+    }
+
+    check();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const canInstall = Boolean(update?.updateAvailable && update.downloadUrl);
+
+  return (
+    <section className="hidden rounded-md border border-zinc-200 bg-white md:block">
+      <div className="flex h-12 items-center gap-2 border-b border-zinc-200 px-4 text-sm font-semibold">
+        <Activity className="h-4 w-4" aria-hidden="true" />
+        软件更新
+      </div>
+      <div className="grid gap-3 p-4 text-sm">
+        <div className="grid gap-1 text-zinc-600">
+          <div>
+            当前版本{" "}
+            <span className="font-semibold text-zinc-950">
+              {update?.currentVersion || "-"}
+            </span>
+          </div>
+          <div>
+            最新版本{" "}
+            <span className="font-semibold text-zinc-950">
+              {checking ? "检查中" : update?.latestVersion || "-"}
+            </span>
+          </div>
+          <div
+            className={cn(
+              "text-xs font-medium",
+              canInstall ? "text-emerald-700" : "text-zinc-500",
+            )}
+          >
+            {checking ? "正在检查更新" : update?.message || "暂无更新信息"}
+          </div>
+        </div>
+        {update?.releaseUrl ? (
+          <a
+            href={update.releaseUrl}
+            target="_blank"
+            className="text-xs font-medium text-zinc-700 underline-offset-2 hover:underline"
+          >
+            查看发布页面
+          </a>
+        ) : null}
+        <form
+          onSubmit={(event) => onSubmit(event, installUpdateAction, "更新")}
+        >
+          <button
+            type="submit"
+            disabled={Boolean(busy) || !canInstall}
+            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
+            title="安装更新"
+          >
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            {busy === "更新"
+              ? "更新中"
+              : canInstall
+                ? `更新到 ${update?.latestVersion}`
+                : "无需更新"}
+          </button>
+        </form>
+      </div>
+    </section>
+  );
+}
+
 function EventLogCard({ events }: { events: OrderEventRecord[] }) {
   return (
     <section className="rounded-md border border-zinc-200 bg-white">
-      <div className="flex h-12 items-center gap-2 border-b border-zinc-200 px-4 text-sm font-semibold">
-        <History className="h-4 w-4" aria-hidden="true" />
-        最近操作
+      <div className="flex h-12 items-center justify-between gap-2 border-b border-zinc-200 px-4">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <History className="h-4 w-4" aria-hidden="true" />
+          最近操作
+        </div>
+        <a
+          href="/events"
+          className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
+          title="查看全部操作"
+        >
+          全部
+          <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+        </a>
       </div>
       <div className="max-h-72 overflow-auto">
         {events.length > 0 ? (
@@ -407,6 +761,9 @@ function OrderRow({
   onSelect: () => void;
 }) {
   const summary = productSummary(order);
+  const returnedSummary = returnSummary(order);
+  const mainTone = orderTextTone(order);
+  const subTone = orderSubTextTone(order);
 
   return (
     <button
@@ -419,11 +776,13 @@ function OrderRow({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-zinc-950">
+          <div className={cn("truncate text-sm font-semibold", mainTone)}>
             {order.code}
           </div>
-          <div className="mt-1 truncate text-xs text-zinc-500">
-            {order.customerName || "未填写客户"}
+          <div className={cn("mt-1 truncate text-xs", subTone)}>
+            {blankText(order.companyName, "未选公司")} ·{" "}
+            {blankText(order.factoryName, "未选工厂")}
+            {order.customerName ? ` · ${order.customerName}` : ""}
           </div>
         </div>
         <div className="flex shrink-0 gap-1">
@@ -437,11 +796,16 @@ function OrderRow({
           ) : null}
         </div>
       </div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500">
+      <div className={cn("flex flex-wrap gap-x-4 gap-y-1 text-xs", subTone)}>
         <span>登记 {order.registeredAt}</span>
         <span>出货 {dateText(order.writtenOffAt)}</span>
         <span>数量 {orderQuantity(order)}</span>
         {summary ? <span>{summary}</span> : null}
+        {returnedSummary ? (
+          <span>
+            {returnSummaryLabel(order)} {returnedSummary}
+          </span>
+        ) : null}
       </div>
     </button>
   );
@@ -464,6 +828,7 @@ function MobileDetail({
   ) => Promise<void>;
 }) {
   const summary = productSummary(order);
+  const returnedSummary = returnSummary(order);
 
   return (
     <div className="grid gap-4 p-4">
@@ -483,6 +848,18 @@ function MobileDetail({
 
       <div className="grid gap-2 text-sm">
         <div className="flex justify-between gap-3">
+          <span className="text-zinc-500">公司</span>
+          <span className="text-right font-medium text-zinc-950">
+            {blankText(order.companyName)}
+          </span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span className="text-zinc-500">工厂</span>
+          <span className="text-right font-medium text-zinc-950">
+            {blankText(order.factoryName)}
+          </span>
+        </div>
+        <div className="flex justify-between gap-3">
           <span className="text-zinc-500">客户</span>
           <span className="text-right font-medium text-zinc-950">
             {order.customerName || "未填写"}
@@ -498,6 +875,14 @@ function MobileDetail({
             {dateText(order.writtenOffAt)}
           </span>
         </div>
+        {order.returnedAt ? (
+          <div className="flex justify-between gap-3">
+            <span className="text-zinc-500">返厂日期</span>
+            <span className="font-medium text-violet-700">
+              {order.returnedAt}
+            </span>
+          </div>
+        ) : null}
         <div className="flex justify-between gap-3">
           <span className="text-zinc-500">数量小计</span>
           <span className="font-medium text-zinc-950">
@@ -559,28 +944,50 @@ function MobileDetail({
         </div>
       ) : null}
 
+      {returnedSummary || order.returnNote ? (
+        <div className="grid gap-2 rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
+          {returnedSummary ? (
+            <div>
+              {returnSummaryLabel(order)}：{returnedSummary}
+            </div>
+          ) : null}
+          {order.returnNote ? <div>{order.returnNote}</div> : null}
+        </div>
+      ) : null}
+
       {order.note ? (
         <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
           {order.note}
         </div>
       ) : null}
 
-      <form
-        onSubmit={(event) => onSubmit(event, writeOffOrderAction, "核销")}
-        className="border-t border-emerald-100 pt-3"
-      >
-        <input type="hidden" name="id" value={order.id} />
-        <input type="hidden" name="writtenOffAt" value={today} />
-        <button
-          type="submit"
-          disabled={Boolean(busy) || order.status === "WRITTEN_OFF"}
-          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-300"
-          title="出货核销"
+      {order.status === "WRITTEN_OFF" || order.status === "RETURNED" ? (
+        <ReturnOrderForm
+          busy={busy}
+          onSubmit={onSubmit}
+          order={order}
+          today={today}
+        />
+      ) : null}
+
+      {order.status !== "WRITTEN_OFF" ? (
+        <form
+          onSubmit={(event) => onSubmit(event, writeOffOrderAction, "核销")}
+          className="border-t border-emerald-100 pt-3"
         >
-          <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-          {busy === "核销" ? "核销中" : writeOffLabel(order.status)}
-        </button>
-      </form>
+          <input type="hidden" name="id" value={order.id} />
+          <input type="hidden" name="writtenOffAt" value={today} />
+          <button
+            type="submit"
+            disabled={Boolean(busy)}
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-300"
+            title="出货核销"
+          >
+            <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+            {busy === "核销" ? "核销中" : writeOffLabel(order.status)}
+          </button>
+        </form>
+      ) : null}
     </div>
   );
 }
@@ -600,14 +1007,17 @@ export function Workbench({
   );
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [urgencyFilter, setUrgencyFilter] = useState<UrgencyFilter>("ALL");
+  const [companyFilter, setCompanyFilter] = useState<CompanyFilter>("ALL");
+  const [factoryFilter, setFactoryFilter] = useState<FactoryFilter>("ALL");
   const [notice, setNotice] = useState<ActionResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const exactMatch = query.trim()
-    ? orders.find(
+  const exactMatches = query.trim()
+    ? orders.filter(
         (order) => order.code.toLowerCase() === query.trim().toLowerCase(),
       )
-    : null;
+    : [];
+  const exactMatch = exactMatches.length === 1 ? exactMatches[0] : null;
   const selected =
     exactMatch ??
     orders.find((order) => order.id === selectedId) ??
@@ -665,10 +1075,44 @@ export function Workbench({
         .slice(0, 8),
     [orders],
   );
+  const companyOptions = useMemo(
+    () =>
+      mergedOptions(
+        COMPANY_OPTIONS,
+        orders.map((order) => order.companyName),
+      ),
+    [orders],
+  );
+  const factoryOptions = useMemo(
+    () =>
+      mergedOptions(
+        FACTORY_OPTIONS,
+        orders.map((order) => order.factoryName),
+      ),
+    [orders],
+  );
 
   const filteredOrders = useMemo(() => {
     return orders
       .filter((order) => orderMatches(order, query))
+      .filter((order) => {
+        if (companyFilter === "ALL") {
+          return true;
+        }
+        if (companyFilter === "UNASSIGNED") {
+          return !order.companyName.trim();
+        }
+        return order.companyName === companyFilter;
+      })
+      .filter((order) => {
+        if (factoryFilter === "ALL") {
+          return true;
+        }
+        if (factoryFilter === "UNASSIGNED") {
+          return !order.factoryName.trim();
+        }
+        return order.factoryName === factoryFilter;
+      })
       .filter((order) => {
         if (statusFilter === "ALL") {
           return true;
@@ -693,7 +1137,14 @@ export function Workbench({
         }
         return b.updatedAt.localeCompare(a.updatedAt);
       });
-  }, [orders, query, statusFilter, urgencyFilter]);
+  }, [
+    orders,
+    query,
+    companyFilter,
+    factoryFilter,
+    statusFilter,
+    urgencyFilter,
+  ]);
 
   const accountSummary = useMemo(() => {
     return {
@@ -735,6 +1186,8 @@ export function Workbench({
   function exportCsv() {
     const headers = [
       "号码",
+      "公司",
+      "工厂",
       "客户",
       "套装",
       "单衫",
@@ -745,6 +1198,13 @@ export function Workbench({
       "登记日期",
       "状态",
       "出货日期",
+      "返厂日期",
+      "返厂套装",
+      "返厂单衫",
+      "返厂单裤",
+      "返厂马甲",
+      "返厂大衣",
+      "返厂备注",
       "急单等级",
       "部分交付数量",
       "部分交付日期",
@@ -753,6 +1213,8 @@ export function Workbench({
     ];
     const rows = filteredOrders.map((order) => [
       order.code,
+      order.companyName,
+      order.factoryName,
       order.customerName,
       String(order.suitQuantity),
       String(order.jacketQuantity),
@@ -763,6 +1225,13 @@ export function Workbench({
       order.registeredAt,
       statusLabels[order.status],
       order.writtenOffAt ?? "",
+      order.returnedAt ?? "",
+      String(order.returnSuitQuantity),
+      String(order.returnJacketQuantity),
+      String(order.returnPantQuantity),
+      String(order.returnVestQuantity),
+      String(order.returnCoatQuantity),
+      order.returnNote,
       urgencyLabels[order.urgency],
       order.partialQuantity ? String(order.partialQuantity) : "",
       order.partialDate ?? "",
@@ -801,6 +1270,14 @@ export function Workbench({
             </div>
           </div>
           <div className="hidden flex-wrap gap-2 md:flex">
+            <a
+              href="/health"
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
+              title="检查工具状态"
+            >
+              <Activity className="h-4 w-4" aria-hidden="true" />
+              检查
+            </a>
             <button
               type="button"
               onClick={exportCsv}
@@ -810,6 +1287,16 @@ export function Workbench({
               <FileDown className="h-4 w-4" aria-hidden="true" />
               导出
             </button>
+            <form action={logoutAction}>
+              <button
+                type="submit"
+                className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
+                title="退出登录"
+              >
+                <LogOut className="h-4 w-4" aria-hidden="true" />
+                退出
+              </button>
+            </form>
           </div>
         </div>
       </header>
@@ -825,7 +1312,7 @@ export function Workbench({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               className="h-12 w-full rounded-md border border-zinc-300 bg-white pl-10 pr-3 text-lg font-medium text-zinc-950 outline-none transition focus:border-zinc-950 focus:ring-2 focus:ring-zinc-200"
-              placeholder="输入订单号查找"
+              placeholder="输入订单号、公司或工厂查找"
               autoFocus
             />
           </label>
@@ -879,7 +1366,7 @@ export function Workbench({
           </div>
         ) : null}
 
-        <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
+        <div className="grid gap-4 lg:grid-cols-[440px_minmax(0,1fr)] xl:grid-cols-[520px_minmax(0,1fr)]">
           <div className="grid content-start gap-4">
             {!isPhoneMode ? (
               <section className="hidden rounded-md border border-zinc-200 bg-white md:block">
@@ -895,34 +1382,65 @@ export function Workbench({
                   }
                   className="grid gap-3 p-4"
                 >
-                  <Field label="订单号">
-                    <input
-                      name="codes"
-                      className={fieldClass()}
-                      placeholder="输入订单号"
-                      required
-                    />
-                  </Field>
                   <input type="hidden" name="registeredAt" value={today} />
                   <input type="hidden" name="quantity" value="1" />
-                  <div className="rounded-md border border-zinc-200">
-                    <div className="border-b border-zinc-200 px-3 py-2 text-xs font-medium text-zinc-600">
-                      登记日期 {today} 自动记录
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-3">
+                  <div className="overflow-x-auto rounded-md border border-zinc-300">
+                    <div className="grid min-w-[430px] grid-cols-[1.35fr_repeat(5,56px)] bg-amber-50 text-center text-xs font-semibold text-zinc-700">
+                      <div className="border-r border-b border-zinc-300 px-2 py-2">
+                        订单号
+                      </div>
                       {PRODUCT_COLUMNS.map((item) => (
-                        <Field key={item.key} label={item.label}>
+                        <div
+                          key={item.key}
+                          className="border-r border-b border-zinc-300 px-2 py-2 last:border-r-0"
+                        >
+                          {item.label}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid min-w-[430px] grid-cols-[1.35fr_repeat(5,56px)]">
+                      <div className="border-r border-zinc-300">
+                        <input
+                          name="codes"
+                          className={tableInputClass("font-semibold")}
+                          placeholder="输入订单号"
+                          required
+                        />
+                      </div>
+                      {PRODUCT_COLUMNS.map((item) => (
+                        <div
+                          key={item.key}
+                          className="border-r border-zinc-300 last:border-r-0"
+                        >
                           <input
                             name={item.key}
                             type="number"
                             min={0}
                             inputMode="numeric"
                             defaultValue={0}
-                            className={fieldClass()}
+                            className={tableInputClass("text-center")}
+                            aria-label={item.label}
                           />
-                        </Field>
+                        </div>
                       ))}
                     </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="公司">
+                      <OptionSelect
+                        name="companyName"
+                        options={companyOptions}
+                        placeholder="选择公司"
+                        required
+                      />
+                    </Field>
+                    <Field label="工厂">
+                      <OptionSelect
+                        name="factoryName"
+                        options={factoryOptions}
+                        placeholder="选择工厂"
+                      />
+                    </Field>
                   </div>
                   <Field label="客户">
                     <input
@@ -935,9 +1453,12 @@ export function Workbench({
                     <select name="urgency" className={fieldClass()}>
                       <option value="NORMAL">普通</option>
                       <option value="URGENT">比较急</option>
-                      <option value="VERY_URGENT">最急</option>
+                      <option value="VERY_URGENT">特急</option>
                     </select>
                   </Field>
+                  <div className="text-xs font-medium text-zinc-500">
+                    登记日期 {today} 自动记录
+                  </div>
                   <Field label="备注">
                     <textarea name="note" rows={3} className={textareaClass()} />
                   </Field>
@@ -959,6 +1480,8 @@ export function Workbench({
             {!isPhoneMode ? (
               <ImportBackupCard busy={busy} onSubmit={submit} />
             ) : null}
+
+            {!isPhoneMode ? <UpdateCard busy={busy} onSubmit={submit} /> : null}
 
             <section className="rounded-md border border-zinc-200 bg-white">
               <div className="flex h-12 items-center gap-2 border-b border-zinc-200 px-4 text-sm font-semibold">
@@ -1038,6 +1561,9 @@ export function Workbench({
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-zinc-500">
                       <span>登记 {selected.registeredAt}</span>
                       <span>出货 {dateText(selected.writtenOffAt)}</span>
+                      {selected.returnedAt ? (
+                        <span>返厂 {selected.returnedAt}</span>
+                      ) : null}
                       <span>数量 {orderQuantity(selected)}</span>
                       <span>更新 {formatDateTime(selected.updatedAt)}</span>
                     </div>
@@ -1053,6 +1579,22 @@ export function Workbench({
                     <input type="hidden" name="id" value={selected.id} />
                     <input type="hidden" name="quantity" value={selected.quantity} />
                     <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label="公司">
+                        <OptionSelect
+                          name="companyName"
+                          options={companyOptions}
+                          placeholder="选择公司"
+                          value={selected.companyName}
+                        />
+                      </Field>
+                      <Field label="工厂">
+                        <OptionSelect
+                          name="factoryName"
+                          options={factoryOptions}
+                          placeholder="选择工厂"
+                          value={selected.factoryName}
+                        />
+                      </Field>
                       <Field label="登记日期">
                         <input
                           name="registeredAt"
@@ -1076,7 +1618,7 @@ export function Workbench({
                         >
                           <option value="NORMAL">普通</option>
                           <option value="URGENT">比较急</option>
-                          <option value="VERY_URGENT">最急</option>
+                          <option value="VERY_URGENT">特急</option>
                         </select>
                       </Field>
                     </div>
@@ -1145,6 +1687,16 @@ export function Workbench({
                     </button>
                   </form>
 
+                  {selected.status === "WRITTEN_OFF" ||
+                  selected.status === "RETURNED" ? (
+                    <ReturnOrderForm
+                      busy={busy}
+                      onSubmit={submit}
+                      order={selected}
+                      today={today}
+                    />
+                  ) : null}
+
                   <div className="grid gap-2 sm:grid-cols-2">
                     <form
                       onSubmit={(event) =>
@@ -1155,7 +1707,10 @@ export function Workbench({
                       <input type="hidden" name="id" value={selected.id} />
                       <input type="hidden" name="writtenOffAt" value={today} />
                       <div className="text-sm text-zinc-600">
-                        出货日期自动记录 {today}
+                        {selected.status === "RETURNED"
+                          ? "完成返厂日期自动记录"
+                          : "出货日期自动记录"}{" "}
+                        {today}
                       </div>
                       <button
                         type="submit"
@@ -1163,7 +1718,9 @@ export function Workbench({
                           Boolean(busy) || selected.status === "WRITTEN_OFF"
                         }
                         className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-300"
-                        title="出货核销"
+                        title={
+                          selected.status === "RETURNED" ? "完成返厂" : "出货核销"
+                        }
                       >
                         <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
                         {busy === "核销"
@@ -1206,6 +1763,36 @@ export function Workbench({
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <select
+                    value={companyFilter}
+                    onChange={(event) =>
+                      setCompanyFilter(event.target.value as CompanyFilter)
+                    }
+                    className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-sm"
+                  >
+                    <option value="ALL">全部公司</option>
+                    <option value="UNASSIGNED">未选公司</option>
+                    {companyOptions.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={factoryFilter}
+                    onChange={(event) =>
+                      setFactoryFilter(event.target.value as FactoryFilter)
+                    }
+                    className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-sm"
+                  >
+                    <option value="ALL">全部工厂</option>
+                    <option value="UNASSIGNED">未选工厂</option>
+                    {factoryOptions.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                  <select
                     value={statusFilter}
                     onChange={(event) =>
                       setStatusFilter(event.target.value as StatusFilter)
@@ -1216,6 +1803,7 @@ export function Workbench({
                     <option value="OPEN">未完成</option>
                     <option value="PENDING">待核销</option>
                     <option value="PARTIAL">部分交付</option>
+                    <option value="RETURNED">返厂修改</option>
                     <option value="WRITTEN_OFF">已核销</option>
                   </select>
                   <select
@@ -1226,7 +1814,7 @@ export function Workbench({
                     className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-sm"
                   >
                     <option value="ALL">全部急度</option>
-                    <option value="VERY_URGENT">最急</option>
+                    <option value="VERY_URGENT">特急</option>
                     <option value="URGENT">比较急</option>
                     <option value="NORMAL">普通</option>
                   </select>

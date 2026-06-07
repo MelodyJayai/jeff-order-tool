@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,7 +8,7 @@ import {
   calculateTotalQuantity,
   type ProductQuantityKey,
 } from "@/lib/catalog";
-import { nowIso } from "@/lib/date";
+import { chinaToday, nowIso } from "@/lib/date";
 import type {
   CreateOrdersInput,
   ImportOrderInput,
@@ -17,6 +17,7 @@ import type {
   OrderEventRecord,
   OrderRecord,
   OrderStatus,
+  ReturnOrderInput,
   UpdateOrderInput,
   UrgencyLevel,
 } from "@/lib/types";
@@ -24,6 +25,8 @@ import type {
 type OrderRow = {
   id: string;
   code: string;
+  company_name: string | null;
+  factory_name: string | null;
   customer_name: string | null;
   product_name: string | null;
   quantity: number;
@@ -36,6 +39,13 @@ type OrderRow = {
   registered_at: string;
   status: string;
   written_off_at: string | null;
+  returned_at: string | null;
+  return_note: string | null;
+  return_suit_quantity: number | null;
+  return_jacket_quantity: number | null;
+  return_pant_quantity: number | null;
+  return_vest_quantity: number | null;
+  return_coat_quantity: number | null;
   urgency: string;
   partial_quantity: number | null;
   partial_date: string | null;
@@ -61,7 +71,10 @@ const globalForDb = globalThis as typeof globalThis & {
 const DB_PATH = process.env.JEFF_ORDER_DB_PATH
   ? path.resolve(process.env.JEFF_ORDER_DB_PATH)
   : path.join(process.cwd(), "data", "orders.db");
-const SCHEMA_VERSION = "2026-06-03-v1";
+const BACKUP_DIR = process.env.JEFF_BACKUP_DIR
+  ? path.resolve(process.env.JEFF_BACKUP_DIR)
+  : path.join(path.dirname(DB_PATH), "backups");
+const SCHEMA_VERSION = "2026-06-07-v4-return-quantities";
 
 function productValues(input: Record<ProductQuantityKey, number>) {
   return {
@@ -71,6 +84,75 @@ function productValues(input: Record<ProductQuantityKey, number>) {
     vestQuantity: input.vestQuantity,
     coatQuantity: input.coatQuantity,
   };
+}
+
+type ReturnQuantityKey =
+  | "returnSuitQuantity"
+  | "returnJacketQuantity"
+  | "returnPantQuantity"
+  | "returnVestQuantity"
+  | "returnCoatQuantity";
+
+const RETURN_QUANTITY_FIELDS = [
+  { key: "suitQuantity", returnKey: "returnSuitQuantity", label: "套装" },
+  { key: "jacketQuantity", returnKey: "returnJacketQuantity", label: "单衫" },
+  { key: "pantQuantity", returnKey: "returnPantQuantity", label: "单裤" },
+  { key: "vestQuantity", returnKey: "returnVestQuantity", label: "马甲" },
+  { key: "coatQuantity", returnKey: "returnCoatQuantity", label: "大衣" },
+] as const satisfies ReadonlyArray<{
+  key: ProductQuantityKey;
+  returnKey: ReturnQuantityKey;
+  label: string;
+}>;
+
+function returnProductValues(input: ReturnOrderInput | ImportOrderInput) {
+  return {
+    returnSuitQuantity: input.returnSuitQuantity,
+    returnJacketQuantity: input.returnJacketQuantity,
+    returnPantQuantity: input.returnPantQuantity,
+    returnVestQuantity: input.returnVestQuantity,
+    returnCoatQuantity: input.returnCoatQuantity,
+  };
+}
+
+function returnQuantityTotal(
+  input: Pick<
+    ReturnOrderInput,
+    | "returnSuitQuantity"
+    | "returnJacketQuantity"
+    | "returnPantQuantity"
+    | "returnVestQuantity"
+    | "returnCoatQuantity"
+  >,
+) {
+  return (
+    input.returnSuitQuantity +
+    input.returnJacketQuantity +
+    input.returnPantQuantity +
+    input.returnVestQuantity +
+    input.returnCoatQuantity
+  );
+}
+
+function returnQuantityLimitMessage(
+  input: ReturnOrderInput,
+  order: OrderRecord,
+) {
+  const categoryTotal = calculateTotalQuantity(productValues(order));
+
+  if (categoryTotal <= 0) {
+    return returnQuantityTotal(input) > order.quantity
+      ? "返厂总数不能超过原订单总数"
+      : null;
+  }
+
+  const exceededLabels = RETURN_QUANTITY_FIELDS.filter(
+    (item) => input[item.returnKey] > order[item.key],
+  ).map((item) => item.label);
+
+  return exceededLabels.length > 0
+    ? `${exceededLabels.join("、")}返厂数量不能超过原订单数量`
+    : null;
 }
 
 function totalQuantity(input: Record<ProductQuantityKey, number>, fallback = 1) {
@@ -93,6 +175,121 @@ function ensureColumn(
   }
 }
 
+function createOrdersTableSql(tableName: string) {
+  return `
+    CREATE TABLE ${tableName} (
+      id TEXT PRIMARY KEY,
+      code TEXT NOT NULL COLLATE NOCASE,
+      company_name TEXT,
+      factory_name TEXT,
+      customer_name TEXT,
+      product_name TEXT,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      suit_quantity INTEGER NOT NULL DEFAULT 0,
+      jacket_quantity INTEGER NOT NULL DEFAULT 0,
+      pant_quantity INTEGER NOT NULL DEFAULT 0,
+      vest_quantity INTEGER NOT NULL DEFAULT 0,
+      coat_quantity INTEGER NOT NULL DEFAULT 0,
+      extra_fee INTEGER NOT NULL DEFAULT 0,
+      registered_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      written_off_at TEXT,
+      returned_at TEXT,
+      return_note TEXT,
+      return_suit_quantity INTEGER NOT NULL DEFAULT 0,
+      return_jacket_quantity INTEGER NOT NULL DEFAULT 0,
+      return_pant_quantity INTEGER NOT NULL DEFAULT 0,
+      return_vest_quantity INTEGER NOT NULL DEFAULT 0,
+      return_coat_quantity INTEGER NOT NULL DEFAULT 0,
+      urgency TEXT NOT NULL DEFAULT 'NORMAL',
+      partial_quantity INTEGER,
+      partial_date TEXT,
+      partial_note TEXT,
+      note TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `;
+}
+
+function hasGlobalCodeUniqueConstraint(db: Database.Database) {
+  const indexes = db.prepare("PRAGMA index_list('orders')").all() as Array<{
+    name: string;
+    unique: number;
+  }>;
+
+  return indexes.some((index) => {
+    if (!index.unique) {
+      return false;
+    }
+
+    const columns = db
+      .prepare(`PRAGMA index_info(${JSON.stringify(index.name)})`)
+      .all() as Array<{ name: string }>;
+
+    return columns.length === 1 && columns[0]?.name === "code";
+  });
+}
+
+function rebuildOrdersWithoutGlobalCodeUnique(db: Database.Database) {
+  if (!hasGlobalCodeUniqueConstraint(db)) {
+    return;
+  }
+
+  const previousForeignKeys = db.pragma("foreign_keys", { simple: true }) as
+    | number
+    | string;
+  db.pragma("foreign_keys = OFF");
+
+  try {
+    db.transaction(() => {
+      db.exec("DROP TABLE IF EXISTS orders_v3_company_code");
+      db.exec(createOrdersTableSql("orders_v3_company_code"));
+      db.exec(`
+        INSERT INTO orders_v3_company_code (
+          id, code, company_name, factory_name, customer_name, product_name,
+          quantity, suit_quantity, jacket_quantity, pant_quantity,
+          vest_quantity, coat_quantity, extra_fee, registered_at, status,
+          written_off_at, returned_at, return_note,
+          return_suit_quantity, return_jacket_quantity, return_pant_quantity,
+          return_vest_quantity, return_coat_quantity, urgency,
+          partial_quantity, partial_date, partial_note, note, created_at, updated_at
+        )
+        SELECT
+          id, code, company_name, factory_name, customer_name, product_name,
+          quantity, suit_quantity, jacket_quantity, pant_quantity,
+          vest_quantity, coat_quantity, extra_fee, registered_at, status,
+          written_off_at, returned_at, return_note,
+          return_suit_quantity, return_jacket_quantity, return_pant_quantity,
+          return_vest_quantity, return_coat_quantity, urgency,
+          partial_quantity, partial_date, partial_note, note, created_at, updated_at
+        FROM orders
+      `);
+      db.exec("DROP TABLE orders");
+      db.exec("ALTER TABLE orders_v3_company_code RENAME TO orders");
+    })();
+  } finally {
+    db.pragma(`foreign_keys = ${previousForeignKeys ? "ON" : "OFF"}`);
+  }
+
+  recordMigration(db, "2026-06-07-v3-remove-global-code-unique");
+}
+
+function ensureOrderIndexes(db: Database.Database) {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_orders_code ON orders(code);
+    CREATE INDEX IF NOT EXISTS idx_orders_status_urgency ON orders(status, urgency);
+    CREATE INDEX IF NOT EXISTS idx_orders_registered_at ON orders(registered_at);
+    CREATE INDEX IF NOT EXISTS idx_orders_written_off_at ON orders(written_off_at);
+    CREATE INDEX IF NOT EXISTS idx_orders_company_factory ON orders(company_name, factory_name);
+  `);
+
+  db.prepare(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_company_code_unique
+     ON orders(lower(trim(ifnull(company_name, ''))), lower(trim(code)))`,
+  ).run();
+}
+
 function recordMigration(db: Database.Database, name: string) {
   db.prepare(
     `INSERT OR IGNORE INTO schema_migrations (name, applied_at)
@@ -110,6 +307,14 @@ function setMeta(db: Database.Database, key: string, value: string) {
   ).run(key, value, nowIso());
 }
 
+function getMeta(db: Database.Database, key: string) {
+  const row = db
+    .prepare("SELECT value FROM app_meta WHERE key = ? LIMIT 1")
+    .get(key) as { value: string } | undefined;
+
+  return row?.value ?? null;
+}
+
 function ensureSchema(db: Database.Database) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -122,35 +327,6 @@ function ensureSchema(db: Database.Database) {
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
-
-    CREATE TABLE IF NOT EXISTS orders (
-      id TEXT PRIMARY KEY,
-      code TEXT NOT NULL UNIQUE COLLATE NOCASE,
-      customer_name TEXT,
-      product_name TEXT,
-      quantity INTEGER NOT NULL DEFAULT 1,
-      suit_quantity INTEGER NOT NULL DEFAULT 0,
-      jacket_quantity INTEGER NOT NULL DEFAULT 0,
-      pant_quantity INTEGER NOT NULL DEFAULT 0,
-      vest_quantity INTEGER NOT NULL DEFAULT 0,
-      coat_quantity INTEGER NOT NULL DEFAULT 0,
-      extra_fee INTEGER NOT NULL DEFAULT 0,
-      registered_at TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'PENDING',
-      written_off_at TEXT,
-      urgency TEXT NOT NULL DEFAULT 'NORMAL',
-      partial_quantity INTEGER,
-      partial_date TEXT,
-      partial_note TEXT,
-      note TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_orders_code ON orders(code);
-    CREATE INDEX IF NOT EXISTS idx_orders_status_urgency ON orders(status, urgency);
-    CREATE INDEX IF NOT EXISTS idx_orders_registered_at ON orders(registered_at);
-    CREATE INDEX IF NOT EXISTS idx_orders_written_off_at ON orders(written_off_at);
 
     CREATE TABLE IF NOT EXISTS order_events (
       id TEXT PRIMARY KEY,
@@ -165,6 +341,18 @@ function ensureSchema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_order_events_created_at ON order_events(created_at);
   `);
 
+  const ordersTable = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'orders'",
+    )
+    .get();
+
+  if (!ordersTable) {
+    db.exec(createOrdersTableSql("orders"));
+  }
+
+  ensureColumn(db, "orders", "company_name", "company_name TEXT");
+  ensureColumn(db, "orders", "factory_name", "factory_name TEXT");
   ensureColumn(
     db,
     "orders",
@@ -196,8 +384,45 @@ function ensureSchema(db: Database.Database) {
     "coat_quantity INTEGER NOT NULL DEFAULT 0",
   );
   ensureColumn(db, "orders", "extra_fee", "extra_fee INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "orders", "returned_at", "returned_at TEXT");
+  ensureColumn(db, "orders", "return_note", "return_note TEXT");
+  ensureColumn(
+    db,
+    "orders",
+    "return_suit_quantity",
+    "return_suit_quantity INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureColumn(
+    db,
+    "orders",
+    "return_jacket_quantity",
+    "return_jacket_quantity INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureColumn(
+    db,
+    "orders",
+    "return_pant_quantity",
+    "return_pant_quantity INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureColumn(
+    db,
+    "orders",
+    "return_vest_quantity",
+    "return_vest_quantity INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureColumn(
+    db,
+    "orders",
+    "return_coat_quantity",
+    "return_coat_quantity INTEGER NOT NULL DEFAULT 0",
+  );
+  rebuildOrdersWithoutGlobalCodeUnique(db);
+  ensureOrderIndexes(db);
   recordMigration(db, "2026-06-03-v1-core-orders");
   recordMigration(db, "2026-06-03-v1-product-quantities");
+  recordMigration(db, "2026-06-06-v2-company-factory");
+  recordMigration(db, "2026-06-07-v3-company-code-identity");
+  recordMigration(db, "2026-06-07-v4-return-quantities");
   setMeta(db, "schema_version", SCHEMA_VERSION);
   setMeta(db, "app_name", "jeff-order-tool");
 }
@@ -220,7 +445,7 @@ function getDb() {
 }
 
 function toStatus(value: string): OrderStatus {
-  if (value === "PARTIAL" || value === "WRITTEN_OFF") {
+  if (value === "PARTIAL" || value === "RETURNED" || value === "WRITTEN_OFF") {
     return value;
   }
   return "PENDING";
@@ -241,16 +466,28 @@ function mapOrder(row: OrderRow): OrderRecord {
     vestQuantity: row.vest_quantity ?? 0,
     coatQuantity: row.coat_quantity ?? 0,
   };
+  const returnQuantities = {
+    returnSuitQuantity: row.return_suit_quantity ?? 0,
+    returnJacketQuantity: row.return_jacket_quantity ?? 0,
+    returnPantQuantity: row.return_pant_quantity ?? 0,
+    returnVestQuantity: row.return_vest_quantity ?? 0,
+    returnCoatQuantity: row.return_coat_quantity ?? 0,
+  };
 
   return {
     id: row.id,
     code: row.code,
+    companyName: row.company_name ?? "",
+    factoryName: row.factory_name ?? "",
     customerName: row.customer_name ?? "",
     quantity: row.quantity,
     ...quantities,
+    ...returnQuantities,
     registeredAt: row.registered_at,
     status: toStatus(row.status),
     writtenOffAt: row.written_off_at,
+    returnedAt: row.returned_at,
+    returnNote: row.return_note ?? "",
     urgency: toUrgency(row.urgency),
     partialQuantity: row.partial_quantity,
     partialDate: row.partial_date,
@@ -283,7 +520,9 @@ function toEventType(value: string): OrderEventType {
   if (
     value === "UPDATED" ||
     value === "PARTIAL" ||
+    value === "RETURNED" ||
     value === "WRITTEN_OFF" ||
+    value === "RETURN_RESOLVED" ||
     value === "UNDO_WRITTEN_OFF"
   ) {
     return value;
@@ -313,6 +552,186 @@ export function listOrders() {
     .all() as OrderRow[];
 
   return rows.map(mapOrder);
+}
+
+export function getAppMeta(key: string) {
+  return getMeta(getDb(), key);
+}
+
+export function setAppMeta(key: string, value: string) {
+  setMeta(getDb(), key, value);
+}
+
+export function getStoredAdminPasswordHash() {
+  return getAppMeta("admin_password_hash");
+}
+
+export function setStoredAdminPasswordHash(hash: string) {
+  setAppMeta("admin_password_hash", hash);
+}
+
+export function getDatabasePath() {
+  return DB_PATH;
+}
+
+export function getDataDirectory() {
+  return path.dirname(DB_PATH);
+}
+
+export function getOrCreateSessionSecret() {
+  const db = getDb();
+  const current = getMeta(db, "session_secret");
+
+  if (current) {
+    return current;
+  }
+
+  const secret = randomBytes(32).toString("base64url");
+  setMeta(db, "session_secret", secret);
+  return secret;
+}
+
+function retentionDays() {
+  const parsed = Number.parseInt(
+    process.env.JEFF_BACKUP_RETENTION_DAYS ?? "30",
+    10,
+  );
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
+}
+
+function backupTimestamp() {
+  return new Date().toISOString().replaceAll(":", "-").slice(0, 19);
+}
+
+function cleanupBackupFiles() {
+  if (!fs.existsSync(BACKUP_DIR)) {
+    return;
+  }
+
+  const cutoff = Date.now() - retentionDays() * 24 * 60 * 60 * 1000;
+
+  for (const item of fs.readdirSync(BACKUP_DIR, { withFileTypes: true })) {
+    if (!item.isFile() || !/^jeff-order-.*\.db$/u.test(item.name)) {
+      continue;
+    }
+
+    const filePath = path.join(BACKUP_DIR, item.name);
+    const stat = fs.statSync(filePath);
+
+    if (stat.mtimeMs < cutoff) {
+      fs.rmSync(filePath, { force: true });
+    }
+  }
+}
+
+function findOrderByCompanyCode(
+  db: Database.Database,
+  companyName: string,
+  code: string,
+  excludeId?: string,
+) {
+  return db
+    .prepare(
+      `SELECT id FROM orders
+       WHERE lower(trim(code)) = lower(trim(@code))
+         AND lower(trim(ifnull(company_name, ''))) = lower(trim(@companyName))
+         AND (@excludeId IS NULL OR id <> @excludeId)
+       LIMIT 1`,
+    )
+    .get({
+      code,
+      companyName,
+      excludeId: excludeId ?? null,
+    }) as { id: string } | undefined;
+}
+
+function duplicateLabel(companyName: string, code: string) {
+  return `${companyName || "未选公司"} / ${code}`;
+}
+
+export async function createDatabaseBackupFile(kind = "manual") {
+  const db = getDb();
+  const cleanKind = kind.replaceAll(/[^a-z0-9-]/giu, "-").toLowerCase();
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+
+  const filename = `jeff-order-${cleanKind}-${backupTimestamp()}.db`;
+  const backupPath = path.join(BACKUP_DIR, filename);
+  await db.backup(backupPath);
+  cleanupBackupFiles();
+
+  const stat = fs.statSync(backupPath);
+  setMeta(db, `last_${cleanKind}_backup_at`, nowIso());
+
+  return {
+    filename,
+    path: backupPath,
+    sizeBytes: stat.size,
+    createdAt: stat.mtime.toISOString(),
+  };
+}
+
+export async function ensureDailyDatabaseBackup() {
+  const db = getDb();
+  const today = chinaToday();
+
+  if (getMeta(db, "last_daily_backup_date") === today) {
+    return null;
+  }
+
+  const backup = await createDatabaseBackupFile("daily");
+  setMeta(db, "last_daily_backup_date", today);
+  return backup;
+}
+
+export function getBackupSummary() {
+  const db = getDb();
+  const files = fs.existsSync(BACKUP_DIR)
+    ? fs
+        .readdirSync(BACKUP_DIR, { withFileTypes: true })
+        .filter((item) => item.isFile() && /^jeff-order-.*\.db$/u.test(item.name))
+        .map((item) => {
+          const filePath = path.join(BACKUP_DIR, item.name);
+          const stat = fs.statSync(filePath);
+
+          return {
+            filename: item.name,
+            path: filePath,
+            sizeBytes: stat.size,
+            createdAt: stat.mtime.toISOString(),
+          };
+        })
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    : [];
+
+  return {
+    directory: BACKUP_DIR,
+    files,
+    latest: files[0] ?? null,
+    lastDailyBackupDate: getMeta(db, "last_daily_backup_date"),
+    retentionDays: retentionDays(),
+  };
+}
+
+export function getDatabaseSummary() {
+  const db = getDb();
+  const orderRow = db.prepare("SELECT COUNT(*) AS count FROM orders").get() as {
+    count: number;
+  };
+  const eventRow = db
+    .prepare("SELECT COUNT(*) AS count FROM order_events")
+    .get() as { count: number };
+  const stat = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH) : null;
+
+  return {
+    path: DB_PATH,
+    exists: Boolean(stat),
+    sizeBytes: stat?.size ?? 0,
+    orders: orderRow.count,
+    events: eventRow.count,
+    schemaVersion: getMeta(db, "schema_version") ?? SCHEMA_VERSION,
+    updatedAt: stat?.mtime.toISOString() ?? null,
+  };
 }
 
 export async function createDatabaseBackup() {
@@ -365,18 +784,15 @@ export function createOrders(input: CreateOrdersInput) {
     const skipped: string[] = [];
     let created = 0;
 
-    const exists = db.prepare(
-      "SELECT id FROM orders WHERE code = ? COLLATE NOCASE LIMIT 1",
-    );
     const insert = db.prepare(`
       INSERT INTO orders (
-        id, code, customer_name, quantity,
+        id, code, company_name, factory_name, customer_name, quantity,
         suit_quantity, jacket_quantity, pant_quantity, vest_quantity,
         coat_quantity, registered_at, status, urgency, note,
         created_at, updated_at
       )
       VALUES (
-        @id, @code, @customerName, @quantity,
+        @id, @code, @companyName, @factoryName, @customerName, @quantity,
         @suitQuantity, @jacketQuantity, @pantQuantity, @vestQuantity,
         @coatQuantity, @registeredAt, 'PENDING', @urgency, @note,
         @createdAt, @updatedAt
@@ -386,8 +802,8 @@ export function createOrders(input: CreateOrdersInput) {
     const quantity = totalQuantity(quantities, input.quantity);
 
     for (const code of input.codes) {
-      if (exists.get(code)) {
-        skipped.push(code);
+      if (findOrderByCompanyCode(db, input.companyName, code)) {
+        skipped.push(duplicateLabel(input.companyName, code));
         continue;
       }
 
@@ -395,6 +811,8 @@ export function createOrders(input: CreateOrdersInput) {
       insert.run({
         id,
         code,
+        companyName: input.companyName || null,
+        factoryName: input.factoryName || null,
         customerName: input.customerName || null,
         quantity,
         ...quantities,
@@ -404,7 +822,12 @@ export function createOrders(input: CreateOrdersInput) {
         createdAt: now,
         updatedAt: now,
       });
-      insertEvent(db, id, "CREATED", `登记号码 ${code}`);
+      insertEvent(
+        db,
+        id,
+        "CREATED",
+        `登记号码 ${code}；公司 ${input.companyName || "未选公司"}`,
+      );
       created += 1;
     }
 
@@ -421,28 +844,31 @@ export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
     let created = 0;
     let updated = 0;
 
-    const exists = db.prepare(
-      "SELECT id FROM orders WHERE code = ? COLLATE NOCASE LIMIT 1",
-    );
     const insert = db.prepare(`
       INSERT INTO orders (
-        id, code, customer_name, quantity,
+        id, code, company_name, factory_name, customer_name, quantity,
         suit_quantity, jacket_quantity, pant_quantity, vest_quantity,
         coat_quantity, registered_at, status, written_off_at, urgency,
+        returned_at, return_note, return_suit_quantity, return_jacket_quantity,
+        return_pant_quantity, return_vest_quantity, return_coat_quantity,
         partial_quantity, partial_date, partial_note, note,
         created_at, updated_at
       )
       VALUES (
-        @id, @code, @customerName, @quantity,
+        @id, @code, @companyName, @factoryName, @customerName, @quantity,
         @suitQuantity, @jacketQuantity, @pantQuantity, @vestQuantity,
         @coatQuantity, @registeredAt, @status, @writtenOffAt, @urgency,
+        @returnedAt, @returnNote, @returnSuitQuantity, @returnJacketQuantity,
+        @returnPantQuantity, @returnVestQuantity, @returnCoatQuantity,
         @partialQuantity, @partialDate, @partialNote, @note,
         @createdAt, @updatedAt
       )
     `);
     const update = db.prepare(`
       UPDATE orders
-      SET customer_name = @customerName,
+      SET company_name = @companyName,
+          factory_name = @factoryName,
+          customer_name = @customerName,
           quantity = @quantity,
           suit_quantity = @suitQuantity,
           jacket_quantity = @jacketQuantity,
@@ -452,6 +878,13 @@ export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
           registered_at = @registeredAt,
           status = @status,
           written_off_at = @writtenOffAt,
+          returned_at = @returnedAt,
+          return_note = @returnNote,
+          return_suit_quantity = @returnSuitQuantity,
+          return_jacket_quantity = @returnJacketQuantity,
+          return_pant_quantity = @returnPantQuantity,
+          return_vest_quantity = @returnVestQuantity,
+          return_coat_quantity = @returnCoatQuantity,
           urgency = @urgency,
           partial_quantity = @partialQuantity,
           partial_date = @partialDate,
@@ -470,17 +903,23 @@ export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
       }
 
       const quantities = productValues(item);
+      const returnQuantities = returnProductValues(item);
       const quantity = totalQuantity(quantities, item.quantity);
-      const current = exists.get(code) as { id: string } | undefined;
+      const current = findOrderByCompanyCode(db, item.companyName, code);
       const values = {
         id: current?.id ?? randomUUID(),
         code,
+        companyName: item.companyName || null,
+        factoryName: item.factoryName || null,
         customerName: item.customerName || null,
         quantity,
         ...quantities,
         registeredAt: item.registeredAt,
         status: item.status,
         writtenOffAt: item.status === "WRITTEN_OFF" ? item.writtenOffAt : null,
+        returnedAt: item.status === "RETURNED" ? item.returnedAt : null,
+        returnNote: item.returnNote || null,
+        ...returnQuantities,
         urgency: item.urgency,
         partialQuantity: item.partialQuantity,
         partialDate: item.partialDate,
@@ -510,7 +949,11 @@ export function updateOrder(input: UpdateOrderInput) {
   const current = getOrder(input.id);
 
   if (!current) {
-    return false;
+    return "missing" as const;
+  }
+
+  if (findOrderByCompanyCode(db, input.companyName, current.code, input.id)) {
+    return "duplicate" as const;
   }
 
   const now = nowIso();
@@ -521,8 +964,8 @@ export function updateOrder(input: UpdateOrderInput) {
     Boolean(input.partialDate) ||
     input.partialNote.trim().length > 0;
   const status =
-    current.status === "WRITTEN_OFF"
-      ? "WRITTEN_OFF"
+    current.status === "WRITTEN_OFF" || current.status === "RETURNED"
+      ? current.status
       : hasPartial
         ? "PARTIAL"
         : "PENDING";
@@ -530,7 +973,9 @@ export function updateOrder(input: UpdateOrderInput) {
   db.transaction(() => {
     db.prepare(`
       UPDATE orders
-      SET customer_name = @customerName,
+      SET company_name = @companyName,
+          factory_name = @factoryName,
+          customer_name = @customerName,
           quantity = @quantity,
           suit_quantity = @suitQuantity,
           jacket_quantity = @jacketQuantity,
@@ -548,6 +993,8 @@ export function updateOrder(input: UpdateOrderInput) {
       WHERE id = @id
     `).run({
       id: input.id,
+      companyName: input.companyName || null,
+      factoryName: input.factoryName || null,
       customerName: input.customerName || null,
       quantity,
       ...quantities,
@@ -568,7 +1015,7 @@ export function updateOrder(input: UpdateOrderInput) {
     );
   })();
 
-  return true;
+  return "updated" as const;
 }
 
 export function writeOffOrder(id: string, writtenOffAt: string) {
@@ -587,9 +1034,10 @@ export function writeOffOrder(id: string, writtenOffAt: string) {
     const result = db.prepare(`
       UPDATE orders
       SET status = 'WRITTEN_OFF',
-          written_off_at = @writtenOffAt,
+          written_off_at = COALESCE(written_off_at, @writtenOffAt),
           updated_at = @updatedAt
       WHERE id = @id
+        AND status <> 'WRITTEN_OFF'
     `).run({
       id,
       writtenOffAt,
@@ -600,11 +1048,85 @@ export function writeOffOrder(id: string, writtenOffAt: string) {
       return false;
     }
 
+    if (current.status === "RETURNED") {
+      insertEvent(db, id, "RETURN_RESOLVED", `完成返厂 ${writtenOffAt}`);
+      return "resolved" as const;
+    }
+
     insertEvent(db, id, "WRITTEN_OFF", `出货日期 ${writtenOffAt}`);
-    return true;
+    return "updated" as const;
   })();
 
-  return updated ? ("updated" as const) : ("already" as const);
+  return updated || ("already" as const);
+}
+
+export function markOrderReturned(input: ReturnOrderInput) {
+  const db = getDb();
+  const current = getOrder(input.id);
+
+  if (!current) {
+    return "missing" as const;
+  }
+
+  if (current.status !== "WRITTEN_OFF" && current.status !== "RETURNED") {
+    return "not_written_off" as const;
+  }
+
+  if (returnQuantityTotal(input) <= 0) {
+    return "empty" as const;
+  }
+
+  if (returnQuantityLimitMessage(input, current)) {
+    return "exceeds_quantity" as const;
+  }
+
+  const now = nowIso();
+  const returnQuantities = returnProductValues(input);
+  const eventPrefix =
+    current.status === "RETURNED" ? "更新返厂修改" : "返厂修改";
+
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE orders
+      SET status = 'RETURNED',
+          returned_at = @returnedAt,
+          return_note = @returnNote,
+          return_suit_quantity = @returnSuitQuantity,
+          return_jacket_quantity = @returnJacketQuantity,
+          return_pant_quantity = @returnPantQuantity,
+          return_vest_quantity = @returnVestQuantity,
+          return_coat_quantity = @returnCoatQuantity,
+          updated_at = @updatedAt
+      WHERE id = @id
+    `).run({
+      id: input.id,
+      returnedAt: input.returnedAt,
+      returnNote: input.returnNote || null,
+      ...returnQuantities,
+      updatedAt: now,
+    });
+
+    const quantityText = [
+      input.returnSuitQuantity ? `套装${input.returnSuitQuantity}` : "",
+      input.returnJacketQuantity ? `单衫${input.returnJacketQuantity}` : "",
+      input.returnPantQuantity ? `单裤${input.returnPantQuantity}` : "",
+      input.returnVestQuantity ? `马甲${input.returnVestQuantity}` : "",
+      input.returnCoatQuantity ? `大衣${input.returnCoatQuantity}` : "",
+    ]
+      .filter(Boolean)
+      .join("、");
+
+    insertEvent(
+      db,
+      input.id,
+      "RETURNED",
+      `${eventPrefix} ${input.returnedAt}：${quantityText}${
+        input.returnNote ? `；${input.returnNote}` : ""
+      }`,
+    );
+  })();
+
+  return "updated" as const;
 }
 
 export function undoWriteOffOrder(id: string) {

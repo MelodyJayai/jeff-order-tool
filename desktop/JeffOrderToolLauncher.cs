@@ -2,6 +2,8 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -16,19 +18,36 @@ internal static class JeffOrderToolLauncher
         public string LogPath;
     }
 
+    private sealed class HealthStatus
+    {
+        public bool Ready;
+        public bool IsJeffOrderTool;
+        public bool IsCurrentInstance;
+    }
+
     [STAThread]
     private static void Main()
     {
         string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        string expectedInstanceId = ComputeInstanceId(baseDir);
         string url = "http://127.0.0.1:" + Port;
+        string healthUrl = url + "/api/health";
 
         try
         {
-            if (!IsReady(url))
+            HealthStatus health = GetHealthStatus(healthUrl, expectedInstanceId);
+
+            if (!health.Ready || !health.IsCurrentInstance)
             {
+                if (health.Ready && health.IsJeffOrderTool && !health.IsCurrentInstance)
+                {
+                    StopOtherJeffOrderServers(baseDir);
+                    Thread.Sleep(1000);
+                }
+
                 ServerStart server = StartServer(baseDir);
 
-                if (!WaitUntilReady(url, TimeSpan.FromSeconds(60), server.Process))
+                if (!WaitUntilReady(healthUrl, expectedInstanceId, TimeSpan.FromSeconds(60), server.Process))
                 {
                     string detail = ReadLogTail(server.LogPath);
                     string message = server.Process.HasExited
@@ -89,13 +108,20 @@ internal static class JeffOrderToolLauncher
             " starting JeffOrderTool ====" + Environment.NewLine);
 
         string command =
-            Quote(nodeExe) + " " + Quote(serverJs) +
-            " >> " + Quote(logPath) + " 2>&1";
+            QuoteForCmd(nodeExe) + " " + QuoteForCmd(serverJs) +
+            " >> " + QuoteForCmd(logPath) + " 2>&1";
+
+        File.AppendAllText(
+            logPath,
+            "node=" + nodeExe + Environment.NewLine +
+            "server=" + serverJs + Environment.NewLine +
+            "data=" + Path.Combine(dataDir, "orders.db") + Environment.NewLine +
+            "port=" + Port.ToString() + Environment.NewLine);
 
         var info = new ProcessStartInfo
         {
             FileName = "cmd.exe",
-            Arguments = "/d /s /c " + Quote(command),
+            Arguments = "/d /c \"" + command + "\"",
             WorkingDirectory = serverDir,
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -107,6 +133,7 @@ internal static class JeffOrderToolLauncher
         info.EnvironmentVariables["HOSTNAME"] = "0.0.0.0";
         info.EnvironmentVariables["JEFF_ORDER_DB_PATH"] =
             Path.Combine(dataDir, "orders.db");
+        info.EnvironmentVariables["JEFF_APP_BASE_DIR"] = baseDir;
 
         Process process = Process.Start(info);
 
@@ -119,7 +146,11 @@ internal static class JeffOrderToolLauncher
         return new ServerStart { Process = process, LogPath = logPath };
     }
 
-    private static bool WaitUntilReady(string url, TimeSpan timeout, Process process)
+    private static bool WaitUntilReady(
+        string url,
+        string expectedInstanceId,
+        TimeSpan timeout,
+        Process process)
     {
         DateTime deadline = DateTime.Now.Add(timeout);
 
@@ -130,7 +161,7 @@ internal static class JeffOrderToolLauncher
                 return false;
             }
 
-            if (IsReady(url))
+            if (GetHealthStatus(url, expectedInstanceId).IsCurrentInstance)
             {
                 return true;
             }
@@ -166,8 +197,10 @@ internal static class JeffOrderToolLauncher
         }
     }
 
-    private static bool IsReady(string url)
+    private static HealthStatus GetHealthStatus(string url, string expectedInstanceId)
     {
+        var status = new HealthStatus();
+
         try
         {
             var request = (HttpWebRequest)WebRequest.Create(url);
@@ -178,18 +211,79 @@ internal static class JeffOrderToolLauncher
             {
                 if ((int)response.StatusCode < 200 || (int)response.StatusCode >= 500)
                 {
-                    return false;
+                    return status;
                 }
 
                 using (var reader = new StreamReader(response.GetResponseStream()))
                 {
-                    return reader.ReadToEnd().Contains("jeff-order-tool");
+                    string body = reader.ReadToEnd();
+                    status.Ready = body.Contains("jeff-order-tool");
+                    status.IsJeffOrderTool = status.Ready;
+                    status.IsCurrentInstance =
+                        status.Ready &&
+                        body.Contains("\"instanceId\":\"" + expectedInstanceId + "\"");
+                    return status;
                 }
             }
         }
         catch
         {
-            return false;
+            return status;
+        }
+    }
+
+    private static void StopOtherJeffOrderServers(string currentBaseDir)
+    {
+        string script =
+            "$current = " + QuoteForPowerShell(currentBaseDir) + "; " +
+            "Get-CimInstance Win32_Process | Where-Object { " +
+            "($_.Name -eq 'node.exe' -or $_.Name -eq 'cmd.exe') -and " +
+            "$_.CommandLine -and " +
+            "($_.CommandLine -like '*JeffOrderTool*' -or $_.CommandLine -like '*jeff-order-tool*' -or $_.CommandLine -like '*server.js*') -and " +
+            "$_.CommandLine -notlike ('*' + $current + '*') " +
+            "} | ForEach-Object { taskkill.exe /PID $_.ProcessId /T /F | Out-Null }";
+
+        try
+        {
+            var info = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = "-NoProfile -ExecutionPolicy Bypass -Command " + QuoteForCmd(script),
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+            };
+
+            using (Process process = Process.Start(info))
+            {
+                if (process != null)
+                {
+                    process.WaitForExit(8000);
+                }
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static string ComputeInstanceId(string baseDir)
+    {
+        string normalized = Path.GetFullPath(baseDir)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .ToLowerInvariant();
+
+        using (SHA256 sha = SHA256.Create())
+        {
+            byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(normalized));
+            var builder = new StringBuilder(hash.Length * 2);
+
+            foreach (byte item in hash)
+            {
+                builder.Append(item.ToString("x2"));
+            }
+
+            return builder.ToString();
         }
     }
 
@@ -202,8 +296,13 @@ internal static class JeffOrderToolLauncher
         });
     }
 
-    private static string Quote(string value)
+    private static string QuoteForCmd(string value)
     {
-        return "\"" + value.Replace("\"", "\\\"") + "\"";
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
+    }
+
+    private static string QuoteForPowerShell(string value)
+    {
+        return "'" + value.Replace("'", "''") + "'";
     }
 }

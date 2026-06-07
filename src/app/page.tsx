@@ -1,12 +1,16 @@
 import { Workbench } from "@/app/components/workbench";
+import { requireAuthenticatedPage } from "@/lib/auth";
 import { chinaToday } from "@/lib/date";
-import { listOrderEvents, listOrders } from "@/lib/db";
+import { ensureDailyDatabaseBackup, listOrderEvents, listOrders } from "@/lib/db";
 import { getLanAccessUrls } from "@/lib/network";
 import QRCode from "qrcode";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
+  await requireAuthenticatedPage();
+  await ensureDailyDatabaseBackup();
+
   const orders = listOrders();
   const events = listOrderEvents();
   const urls = getLanAccessUrls();

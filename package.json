@@ -1,11 +1,14 @@
 {
   "name": "jeff-order-tool",
-  "version": "0.1.1",
+  "version": "0.1.8",
   "scripts": {
     "dev": "next dev",
     "dev:lan": "next dev --hostname 0.0.0.0",
     "build": "next build",
     "build:desktop": "powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1",
+    "package:desktop": "powershell -ExecutionPolicy Bypass -File scripts/package-desktop.ps1",
+    "package:installer": "powershell -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
+    "backup:daily": "node scripts/backup-sqlite.cjs",
     "export:postgres": "node scripts/export-sqlite-to-postgres.cjs",
     "start": "next start",
     "lint": "eslint"

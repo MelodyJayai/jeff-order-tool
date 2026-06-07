@@ -46,7 +46,9 @@ const lines = [
   "",
   `CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY,
-  code TEXT NOT NULL UNIQUE,
+  code TEXT NOT NULL,
+  company_name TEXT,
+  factory_name TEXT,
   customer_name TEXT,
   product_name TEXT,
   quantity INTEGER NOT NULL DEFAULT 1,
@@ -59,6 +61,13 @@ const lines = [
   registered_at TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'PENDING',
   written_off_at TEXT,
+  returned_at TEXT,
+  return_note TEXT,
+  return_suit_quantity INTEGER NOT NULL DEFAULT 0,
+  return_jacket_quantity INTEGER NOT NULL DEFAULT 0,
+  return_pant_quantity INTEGER NOT NULL DEFAULT 0,
+  return_vest_quantity INTEGER NOT NULL DEFAULT 0,
+  return_coat_quantity INTEGER NOT NULL DEFAULT 0,
   urgency TEXT NOT NULL DEFAULT 'NORMAL',
   partial_quantity INTEGER,
   partial_date TEXT,
@@ -67,6 +76,9 @@ const lines = [
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );`,
+  "",
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_company_code_unique
+ON orders (lower(trim(coalesce(company_name, ''))), lower(trim(code)));`,
   "",
   `CREATE TABLE IF NOT EXISTS order_events (
   id TEXT PRIMARY KEY,

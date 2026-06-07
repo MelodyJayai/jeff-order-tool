@@ -13,9 +13,11 @@ The data is kept in one long-running order table. It is not split by month.
 Many small workshops do not need a full ERP system. They need a practical tool that makes these daily tasks easier:
 
 - Register an order number.
+- Select the company and factory for an order.
 - Record quantities by product type.
 - Search an order number quickly.
 - Mark an order as shipped.
+- Mark returned-for-alteration items by product type after shipment.
 - Automatically record registration and shipment dates.
 - Track partial delivery notes.
 - Keep urgent orders at the top.
@@ -23,13 +25,29 @@ Many small workshops do not need a full ERP system. They need a practical tool t
 
 This repository contains only the application source code. Real order data, local SQLite databases, generated Windows packages, and logs are ignored by Git.
 
+## Login And First Setup
+
+On the first visit, if no admin password is configured, the app opens `/setup` and asks for an admin password with at least 8 characters.
+
+After setup, both desktop and phone access require login. The desktop header includes a logout button.
+
+For cloud deployment, you can also configure the password through an environment variable:
+
+```text
+JEFF_ADMIN_PASSWORD=replace-with-a-strong-password
+```
+
+If `JEFF_ADMIN_PASSWORD` is set, the app uses it and skips the first-setup page.
+
 ## Main Features
 
 - One persistent order table, no monthly table splitting.
 - Manual order-number registration.
+- Company and factory selection fields.
 - Automatic registration date.
 - Search by order number.
 - Shipment write-off with automatic shipment date.
+- Returned-for-alteration workflow after shipment, with quantities recorded by fine category.
 - Fine category quantities:
   - Suit set
   - Shirt / top
@@ -40,13 +58,17 @@ This repository contains only the application source code. Real order data, loca
 - Partial delivery quantity/date/note fields.
 - CSV export.
 - CSV import with order-number based update/insert.
-- Operation log for registration, updates, partial delivery, write-off, and undo.
+- Operation log page for registration, updates, partial delivery, write-off, returned alterations, returned-alteration completion, and undo.
 - Consistent SQLite backup download.
-- Mobile mode for search, viewing, urgent orders, and shipment write-off.
+- Login protection with first-run admin password setup.
+- Automatic backup before CSV import.
+- Daily backup helper and protected health page.
+- Mobile mode for search, viewing, urgent orders, shipment write-off, returned alterations, and returned-alteration completion.
 - Desktop-only registration and detail editing.
 - Local Wi-Fi phone access QR code.
 - SQLite storage with schema version metadata for future migration.
 - Windows green-package build for non-technical users.
+- Windows installer build and in-app update checks through GitHub Releases.
 
 ## Data Model And Future Migration
 
@@ -61,8 +83,16 @@ The database is designed with future migration in mind:
 - Orders use stable internal IDs.
 - Order numbers are stored as searchable structured fields.
 - Dates are stored as text dates.
-- Shipment status, urgency, and fine-category quantities are structured fields.
+- Company, factory, shipment status, returned-alteration quantities, urgency, and fine-category quantities are structured fields.
 - The database records `schema_version` and `schema_migrations`.
+
+Company and factory options are maintained in:
+
+```text
+src/lib/companies.ts
+```
+
+The first company list has been populated from Jeff's chat feedback and the receipt photos in `companylist`. Factory options are currently set to `新奇洋服` and `度邦洋服`. Add future company or factory names in the same file.
 
 If the tool is later moved to a cloud server, the recommended migration source is the complete `data` directory, not only a single `orders.db` file. SQLite may also use `orders.db-wal` and `orders.db-shm` while running.
 
@@ -114,6 +144,8 @@ The desktop page also shows a QR code for phone access when a private LAN addres
 
 ## Windows Green Package
 
+For real end users, prefer the Windows installer. The green package is still useful for quick testing or portable use.
+
 This project can build a portable Windows folder for users who do not know how to use the command line.
 
 Build it with:
@@ -156,6 +188,61 @@ If startup fails, check:
 logs/server.log
 ```
 
+If the password needs to be reset, run:
+
+```text
+SupportFiles/ResetJeffOrderToolPassword.exe
+```
+
+The reset helper closes the background service. Reopen Jeff Order Tool after the prompt; the app should show the first-setup password page. Order data is not deleted.
+
+## Windows Installer And Updates
+
+Build the installer:
+
+```bash
+npm run package:installer
+```
+
+Output:
+
+```text
+release-installers/JeffOrderToolSetup-vVERSION.exe
+```
+
+The installer defaults to the current Windows user's local app directory:
+
+```text
+%LOCALAPPDATA%\Programs\JeffOrderTool
+```
+
+It creates a desktop shortcut. Upgrade installs overwrite program files but keep `data` and `logs`.
+
+The in-app update card checks GitHub Releases by default:
+
+```text
+https://github.com/MelodyJayai/jeff-order-tool/releases
+```
+
+When publishing a new version, upload `release-installers/JeffOrderToolSetup-vVERSION.exe` to the matching GitHub Release. Installed users can click the update button in the app; the app creates a database backup, downloads the installer, runs it silently in the existing install directory, and reopens the tool.
+
+You can also use a static update manifest instead of GitHub Releases:
+
+```text
+JEFF_UPDATE_MANIFEST_URL=https://example.com/jeff-order-tool/update.json
+```
+
+Manifest format:
+
+```json
+{
+  "version": "0.1.8",
+  "assetName": "JeffOrderToolSetup-v0.1.8.exe",
+  "downloadUrl": "https://example.com/JeffOrderToolSetup-v0.1.8.exe",
+  "releaseUrl": "https://example.com/releases/0.1.8"
+}
+```
+
 ## Office Phone Access
 
 When the computer and phone are on the same Wi-Fi:
@@ -179,10 +266,43 @@ This is local network access. It is not a public cloud deployment.
 The desktop UI includes a data tools card:
 
 - Download a consistent SQLite backup.
-- Import CSV rows. Existing order numbers are updated; new order numbers are created.
-- View recent operation logs.
+- Import CSV rows. Existing order numbers are updated; new order numbers are created. A backup is created before import.
+- View recent operation logs, with a full `/events` page for the latest 500 events.
 
-Duplicate shipment write-off is also blocked on the server side, so repeated clicks do not create repeated write-off records.
+Duplicate shipment write-off is also blocked by the server-side database update condition, so repeated clicks do not create repeated write-off records.
+
+## Backup And Health Check
+
+When the home page opens, the app checks whether today's daily backup already exists. If not, it creates one under the backup directory.
+
+After login, open `/health` or click "检查" in the desktop header to view:
+
+- Login protection status.
+- Database status.
+- Order and operation-log counts.
+- Latest backup time and backup directory.
+
+For cloud servers or scheduled tasks:
+
+```bash
+npm run backup:daily
+```
+
+Default backup directory:
+
+```text
+data/backups
+```
+
+Useful environment variables:
+
+```text
+JEFF_ORDER_DB_PATH=
+JEFF_BACKUP_DIR=
+JEFF_BACKUP_RETENTION_DAYS=30
+NEXT_PUBLIC_SITE_URL=
+JEFF_COOKIE_SECURE=false
+```
 
 ## Build And Check
 
@@ -190,7 +310,11 @@ Duplicate shipment write-off is also blocked on the server side, so repeated cli
 npm run lint
 npm run build
 npm run build:desktop
+npm run package:desktop
+npm run package:installer
 ```
+
+Send users the clean `.7z` file from `release-archives`. Do not directly zip a locally tested `release/JeffOrderTool` folder, because local test runs create `data` and password files.
 
 ## Security And Privacy
 
@@ -199,6 +323,9 @@ Do not commit real workshop data. The following are intentionally ignored:
 - `data/*.db`
 - `data/*.db-*`
 - `release/`
+- `release-package/`
+- `release-archives/`
+- `release-installers/`
 - `logs/`
 - `node_modules/`
 - `.next/`
