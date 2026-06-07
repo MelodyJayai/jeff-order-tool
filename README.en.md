@@ -150,6 +150,7 @@ Chinese deployment guide:
 
 ```text
 docs/cloud-deployment.zh.md
+docs/multi-cloud-deployment.zh.md
 ```
 
 Core commands:
@@ -163,6 +164,12 @@ For a Windows cloud-desktop trial, use:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\cloud\windows\setup-cloud-desktop.ps1
+```
+
+For a cloud VM or multi-cloud Docker deployment, prefer the GHCR image:
+
+```bash
+docker compose -f docker-compose.ghcr.yml up -d
 ```
 
 ## Windows Green Package

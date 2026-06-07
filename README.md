@@ -150,6 +150,7 @@ Jeff 现在需要多设备随时访问和编辑同一份订单数据时，建议
 
 ```text
 docs/cloud-deployment.zh.md
+docs/multi-cloud-deployment.zh.md
 ```
 
 核心命令：
@@ -163,6 +164,12 @@ npm run start:cloud
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\cloud\windows\setup-cloud-desktop.ps1
+```
+
+正式云服务器或多云部署可以优先使用 GHCR 镜像：
+
+```bash
+docker compose -f docker-compose.ghcr.yml up -d
 ```
 
 ## Windows 绿色版

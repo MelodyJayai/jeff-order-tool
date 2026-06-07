@@ -1,0 +1,20 @@
+services:
+  jeff-order-tool:
+    image: ghcr.io/melodyjayai/jeff-order-tool:latest
+    container_name: jeff-order-tool
+    restart: unless-stopped
+    env_file:
+      - .env.cloud
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      JEFF_DEPLOYMENT_MODE: cloud
+      JEFF_DISABLE_IN_APP_UPDATES: "true"
+      JEFF_ORDER_DB_PATH: /app/data/orders.db
+      JEFF_BACKUP_DIR: /app/data/backups
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./cloud-data:/app/data
+

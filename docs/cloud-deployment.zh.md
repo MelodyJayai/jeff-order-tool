@@ -150,6 +150,12 @@ D:\JeffOrderToolCloud\data\logs\backup.log
 
 ## 5. Docker 正式部署
 
+如果是多云或正式容器部署，先阅读：
+
+```text
+docs/multi-cloud-deployment.zh.md
+```
+
 复制配置：
 
 ```bash
