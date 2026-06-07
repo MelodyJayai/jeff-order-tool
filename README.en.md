@@ -218,6 +218,17 @@ The installer defaults to the current Windows user's local app directory:
 
 It creates a desktop shortcut. Upgrade installs overwrite program files but keep `data` and `logs`.
 
+### Migrating From The Green Package To The Installer
+
+If a user has already entered data in the green package, send installer `0.1.10` or newer. On first launch, if the installer data folder does not yet contain `orders.db`, the launcher searches common locations such as Desktop, Downloads, and Documents for an old green-package `data/orders.db`. When it finds one, it copies the whole old `data` folder into the installed app directory.
+
+Recommended user instructions:
+
+1. Do not delete the old green-package folder.
+2. Run the installer.
+3. Open Jeff Order Tool from the desktop shortcut.
+4. If the app says the old green-package data was imported, use only the desktop shortcut from then on.
+
 The in-app update card checks GitHub Releases by default:
 
 ```text

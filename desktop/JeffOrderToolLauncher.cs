@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -25,6 +26,15 @@ internal static class JeffOrderToolLauncher
         public bool IsCurrentInstance;
     }
 
+    private sealed class MigrationCandidate
+    {
+        public string AppDir;
+        public string DataDir;
+        public string DbPath;
+        public DateTime UpdatedAt;
+        public long Size;
+    }
+
     [STAThread]
     private static void Main()
     {
@@ -44,6 +54,8 @@ internal static class JeffOrderToolLauncher
                     StopOtherJeffOrderServers(baseDir);
                     Thread.Sleep(1000);
                 }
+
+                TryMigratePortableData(baseDir);
 
                 ServerStart server = StartServer(baseDir);
 
@@ -77,6 +89,300 @@ internal static class JeffOrderToolLauncher
                 AppTitle,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
+        }
+    }
+
+    private static void TryMigratePortableData(string baseDir)
+    {
+        string dataDir = Path.Combine(baseDir, "data");
+        string targetDb = Path.Combine(dataDir, "orders.db");
+        string logPath = Path.Combine(baseDir, "logs", "migration.log");
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath));
+
+            if (File.Exists(targetDb) && new FileInfo(targetDb).Length > 0)
+            {
+                LogMigration(logPath, "skip: target database already exists");
+                return;
+            }
+
+            MigrationCandidate candidate = FindBestMigrationCandidate(baseDir);
+
+            if (candidate == null)
+            {
+                LogMigration(logPath, "skip: no portable data candidate found");
+                return;
+            }
+
+            Directory.CreateDirectory(dataDir);
+
+            if (DirectoryHasFiles(dataDir))
+            {
+                string backupDir = Path.Combine(
+                    baseDir,
+                    "data-before-portable-migration-" +
+                    DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+                CopyDirectory(dataDir, backupDir);
+                LogMigration(logPath, "backed up existing target data to " + backupDir);
+            }
+
+            CopyDirectory(candidate.DataDir, dataDir);
+            LogMigration(
+                logPath,
+                "migrated data from " + candidate.DataDir +
+                " size=" + candidate.Size.ToString() +
+                " updatedAt=" + candidate.UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss"));
+
+            MessageBox.Show(
+                "已自动导入旧版绿色版的数据。\n\n旧数据位置：\n" +
+                candidate.DataDir +
+                "\n\n以后请从桌面“Jeff订单工具”打开，后续更新也会走安装版自动更新。",
+                AppTitle,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            LogMigration(logPath, "migration failed: " + ex);
+            MessageBox.Show(
+                "自动导入旧版数据失败：" + ex.Message +
+                "\n\n可以先继续打开工具；如果订单没有显示，请保留旧绿色版文件夹，不要删除。",
+                AppTitle,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+    }
+
+    private static MigrationCandidate FindBestMigrationCandidate(string baseDir)
+    {
+        var candidates = new List<MigrationCandidate>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string root in CandidateSearchRoots())
+        {
+            ScanForMigrationCandidates(root, baseDir, candidates, seen, 0, 5);
+        }
+
+        candidates.Sort(delegate(MigrationCandidate left, MigrationCandidate right)
+        {
+            int updated = right.UpdatedAt.CompareTo(left.UpdatedAt);
+
+            if (updated != 0)
+            {
+                return updated;
+            }
+
+            return right.Size.CompareTo(left.Size);
+        });
+
+        return candidates.Count > 0 ? candidates[0] : null;
+    }
+
+    private static IEnumerable<string> CandidateSearchRoots()
+    {
+        var roots = new List<string>();
+        string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        string oneDrive = Environment.GetEnvironmentVariable("OneDrive");
+
+        AddRoot(roots, desktop);
+        AddRoot(roots, Path.Combine(userProfile, "Desktop"));
+        AddRoot(roots, Path.Combine(userProfile, "Downloads"));
+        AddRoot(roots, documents);
+        AddRoot(roots, Path.Combine(userProfile, "Documents"));
+        AddRoot(roots, Path.Combine(userProfile, "OneDrive", "Desktop"));
+        AddRoot(roots, Path.Combine(userProfile, "OneDrive", "Documents"));
+
+        if (!string.IsNullOrWhiteSpace(oneDrive))
+        {
+            AddRoot(roots, Path.Combine(oneDrive, "Desktop"));
+            AddRoot(roots, Path.Combine(oneDrive, "Documents"));
+        }
+
+        return roots;
+    }
+
+    private static void AddRoot(List<string> roots, string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            return;
+        }
+
+        string fullPath = Path.GetFullPath(path);
+
+        foreach (string item in roots)
+        {
+            if (SameDirectory(item, fullPath))
+            {
+                return;
+            }
+        }
+
+        roots.Add(fullPath);
+    }
+
+    private static void ScanForMigrationCandidates(
+        string directory,
+        string baseDir,
+        List<MigrationCandidate> candidates,
+        HashSet<string> seen,
+        int depth,
+        int maxDepth)
+    {
+        if (depth > maxDepth || string.IsNullOrWhiteSpace(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            if (!Directory.Exists(directory) || SameDirectory(directory, baseDir))
+            {
+                return;
+            }
+
+            TryAddMigrationCandidate(directory, baseDir, candidates, seen);
+
+            foreach (string child in Directory.GetDirectories(directory))
+            {
+                if (ShouldSkipSearchDirectory(child, baseDir))
+                {
+                    continue;
+                }
+
+                ScanForMigrationCandidates(
+                    child,
+                    baseDir,
+                    candidates,
+                    seen,
+                    depth + 1,
+                    maxDepth);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void TryAddMigrationCandidate(
+        string appDir,
+        string baseDir,
+        List<MigrationCandidate> candidates,
+        HashSet<string> seen)
+    {
+        string dataDir = Path.Combine(appDir, "data");
+        string dbPath = Path.Combine(dataDir, "orders.db");
+        string runtimePath = Path.Combine(appDir, "runtime", "node.exe");
+        string serverPath = Path.Combine(appDir, "server", "server.js");
+
+        if (SameDirectory(appDir, baseDir) ||
+            !File.Exists(dbPath) ||
+            !File.Exists(runtimePath) ||
+            !File.Exists(serverPath))
+        {
+            return;
+        }
+
+        string normalizedDb = Path.GetFullPath(dbPath);
+
+        if (!seen.Add(normalizedDb))
+        {
+            return;
+        }
+
+        FileInfo db = new FileInfo(dbPath);
+
+        if (db.Length <= 0)
+        {
+            return;
+        }
+
+        candidates.Add(new MigrationCandidate
+        {
+            AppDir = appDir,
+            DataDir = dataDir,
+            DbPath = dbPath,
+            UpdatedAt = db.LastWriteTime,
+            Size = db.Length,
+        });
+    }
+
+    private static bool ShouldSkipSearchDirectory(string directory, string baseDir)
+    {
+        if (SameDirectory(directory, baseDir))
+        {
+            return true;
+        }
+
+        string name = Path.GetFileName(
+            directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+        return
+            name.Equals(".git", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("node_modules", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("AppData", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("Windows", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("$Recycle.Bin", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool DirectoryHasFiles(string directory)
+    {
+        if (!Directory.Exists(directory))
+        {
+            return false;
+        }
+
+        try
+        {
+            using (IEnumerator<string> files =
+                Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).GetEnumerator())
+            {
+                return files.MoveNext();
+            }
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+
+        foreach (string directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
+        {
+            string relative = directory.Substring(source.Length)
+                .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            Directory.CreateDirectory(Path.Combine(destination, relative));
+        }
+
+        foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+        {
+            string relative = file.Substring(source.Length)
+                .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string target = Path.Combine(destination, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(target));
+            File.Copy(file, target, true);
+        }
+    }
+
+    private static void LogMigration(string logPath, string message)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath));
+            File.AppendAllText(
+                logPath,
+                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + message +
+                Environment.NewLine);
+        }
+        catch
+        {
         }
     }
 
@@ -304,5 +610,23 @@ internal static class JeffOrderToolLauncher
     private static string QuoteForPowerShell(string value)
     {
         return "'" + value.Replace("'", "''") + "'";
+    }
+
+    private static bool SameDirectory(string left, string right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+        {
+            return false;
+        }
+
+        string normalizedLeft = Path.GetFullPath(left)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string normalizedRight = Path.GetFullPath(right)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        return string.Equals(
+            normalizedLeft,
+            normalizedRight,
+            StringComparison.OrdinalIgnoreCase);
     }
 }
