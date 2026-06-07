@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import type { FormEvent } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import {
@@ -42,6 +42,8 @@ import {
 import { COMPANY_OPTIONS, FACTORY_OPTIONS } from "@/lib/companies";
 import { formatDateTime } from "@/lib/date";
 import {
+  ORDER_STATUSES,
+  URGENCY_LEVELS,
   type ActionResult,
   type OrderEventRecord,
   type OrderRecord,
@@ -96,8 +98,48 @@ const statusTone: Record<OrderStatus, string> = {
 
 const urgencyTone: Record<UrgencyLevel, string> = {
   NORMAL: "border-zinc-200 bg-white text-zinc-600",
-  URGENT: "border-amber-200 bg-amber-50 text-amber-800",
+  URGENT: "border-yellow-300 bg-yellow-50 text-yellow-800",
   VERY_URGENT: "border-red-200 bg-red-50 text-red-800",
+};
+
+const controlBaseClass =
+  "h-10 w-full rounded-md border px-3 text-sm outline-none transition focus:ring-2";
+const filterSelectBaseClass =
+  "h-9 rounded-md border px-2 text-sm font-medium outline-none transition focus:ring-2";
+const neutralControlTone =
+  "border-zinc-300 bg-white text-zinc-950 focus:border-zinc-950 focus:ring-zinc-200";
+
+const statusControlTone: Record<OrderStatus, string> = {
+  PENDING:
+    "border-zinc-300 bg-zinc-50 text-zinc-800 focus:border-zinc-500 focus:ring-zinc-200",
+  PARTIAL:
+    "border-cyan-300 bg-cyan-50 text-cyan-900 focus:border-cyan-600 focus:ring-cyan-200",
+  RETURNED:
+    "border-violet-300 bg-violet-50 text-violet-900 focus:border-violet-600 focus:ring-violet-200",
+  WRITTEN_OFF:
+    "border-emerald-300 bg-emerald-50 text-emerald-900 focus:border-emerald-600 focus:ring-emerald-200",
+};
+
+const urgencyControlTone: Record<UrgencyLevel, string> = {
+  NORMAL:
+    "border-zinc-300 bg-white text-zinc-900 focus:border-zinc-950 focus:ring-zinc-200",
+  URGENT:
+    "border-yellow-300 bg-yellow-50 text-yellow-900 focus:border-yellow-500 focus:ring-yellow-200",
+  VERY_URGENT:
+    "border-red-300 bg-red-50 text-red-900 focus:border-red-600 focus:ring-red-200",
+};
+
+const statusOptionStyle: Record<OrderStatus, CSSProperties> = {
+  PENDING: { backgroundColor: "#f4f4f5", color: "#3f3f46" },
+  PARTIAL: { backgroundColor: "#ecfeff", color: "#155e75" },
+  RETURNED: { backgroundColor: "#f5f3ff", color: "#5b21b6" },
+  WRITTEN_OFF: { backgroundColor: "#ecfdf5", color: "#047857" },
+};
+
+const urgencyOptionStyle: Record<UrgencyLevel, CSSProperties> = {
+  NORMAL: { backgroundColor: "#ffffff", color: "#3f3f46" },
+  URGENT: { backgroundColor: "#fefce8", color: "#854d0e" },
+  VERY_URGENT: { backgroundColor: "#fef2f2", color: "#b91c1c" },
 };
 
 const eventLabels = {
@@ -239,7 +281,7 @@ function orderTextTone(order: OrderRecord) {
   }
 
   if (order.urgency === "URGENT") {
-    return "text-amber-700";
+    return "text-yellow-700";
   }
 
   return "text-zinc-950";
@@ -259,14 +301,30 @@ function orderSubTextTone(order: OrderRecord) {
   }
 
   if (order.urgency === "URGENT") {
-    return "text-amber-600";
+    return "text-yellow-700";
   }
 
   return "text-zinc-500";
 }
 
-function fieldClass() {
-  return "h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-950 outline-none transition focus:border-zinc-950 focus:ring-2 focus:ring-zinc-200";
+function fieldClass(tone = neutralControlTone) {
+  return cn(controlBaseClass, tone);
+}
+
+function filterSelectClass(tone = neutralControlTone) {
+  return cn(filterSelectBaseClass, tone);
+}
+
+function statusFilterTone(value: StatusFilter) {
+  return ORDER_STATUSES.includes(value as OrderStatus)
+    ? statusControlTone[value as OrderStatus]
+    : neutralControlTone;
+}
+
+function urgencyFilterTone(value: UrgencyFilter) {
+  return URGENCY_LEVELS.includes(value as UrgencyLevel)
+    ? urgencyControlTone[value as UrgencyLevel]
+    : neutralControlTone;
 }
 
 function tableInputClass(extra = "") {
@@ -319,6 +377,31 @@ function OptionSelect({
       {options.map((item) => (
         <option key={item} value={item}>
           {item}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function UrgencySelect({
+  name,
+  value = "NORMAL",
+}: {
+  name: string;
+  value?: UrgencyLevel;
+}) {
+  const [selected, setSelected] = useState<UrgencyLevel>(value);
+
+  return (
+    <select
+      name={name}
+      value={selected}
+      onChange={(event) => setSelected(event.target.value as UrgencyLevel)}
+      className={fieldClass(urgencyControlTone[selected])}
+    >
+      {URGENCY_LEVELS.map((level) => (
+        <option key={level} value={level} style={urgencyOptionStyle[level]}>
+          {urgencyLabels[level]}
         </option>
       ))}
     </select>
@@ -1011,6 +1094,7 @@ export function Workbench({
   const [factoryFilter, setFactoryFilter] = useState<FactoryFilter>("ALL");
   const [notice, setNotice] = useState<ActionResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [entryFormKey, setEntryFormKey] = useState(0);
 
   const exactMatches = query.trim()
     ? orders.filter(
@@ -1025,21 +1109,30 @@ export function Workbench({
     null;
 
   const stats = useMemo(
-    () => ({
-      todayRegistered: orders.filter((order) => order.registeredAt === today)
-        .length,
-      todayQuantity: orders
-        .filter((order) => order.registeredAt === today)
-        .reduce((total, order) => total + orderQuantity(order), 0),
-      todayWrittenOff: orders.filter((order) => order.writtenOffAt === today)
-        .length,
-      open: orders.filter((order) => order.status !== "WRITTEN_OFF").length,
-      partial: orders.filter((order) => order.status === "PARTIAL").length,
-      urgentOpen: orders.filter(
-        (order) =>
-          order.status !== "WRITTEN_OFF" && order.urgency !== "NORMAL",
-      ).length,
-    }),
+    () => {
+      const monthPrefix = today.slice(0, 7);
+      const yearPrefix = today.slice(0, 4);
+
+      return {
+        todayRegistered: orders.filter((order) => order.registeredAt === today)
+          .length,
+        monthRegistered: orders.filter((order) =>
+          order.registeredAt.startsWith(monthPrefix),
+        ).length,
+        yearRegistered: orders.filter((order) =>
+          order.registeredAt.startsWith(yearPrefix),
+        ).length,
+        totalRegistered: orders.length,
+        todayWrittenOff: orders.filter((order) => order.writtenOffAt === today)
+          .length,
+        open: orders.filter((order) => order.status !== "WRITTEN_OFF").length,
+        partial: orders.filter((order) => order.status === "PARTIAL").length,
+        urgentOpen: orders.filter(
+          (order) =>
+            order.status !== "WRITTEN_OFF" && order.urgency !== "NORMAL",
+        ).length,
+      };
+    },
     [orders, today],
   );
 
@@ -1175,6 +1268,7 @@ export function Workbench({
 
       if (actionResult.ok && reset) {
         form.reset();
+        setEntryFormKey((key) => key + 1);
       }
 
       router.refresh();
@@ -1336,8 +1430,11 @@ export function Workbench({
           ) : null}
         </section>
 
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
           <Stat icon={Clock3} label="今日登记" value={stats.todayRegistered} />
+          <Stat icon={ListChecks} label="本月订单" value={stats.monthRegistered} />
+          <Stat icon={History} label="本年订单" value={stats.yearRegistered} />
+          <Stat icon={FileDown} label="历史订单" value={stats.totalRegistered} />
           <Stat
             icon={CheckCircle2}
             label="今日出货"
@@ -1450,11 +1547,7 @@ export function Workbench({
                     />
                   </Field>
                   <Field label="急单等级">
-                    <select name="urgency" className={fieldClass()}>
-                      <option value="NORMAL">普通</option>
-                      <option value="URGENT">比较急</option>
-                      <option value="VERY_URGENT">特急</option>
-                    </select>
+                    <UrgencySelect key={entryFormKey} name="urgency" />
                   </Field>
                   <div className="text-xs font-medium text-zinc-500">
                     登记日期 {today} 自动记录
@@ -1611,15 +1704,10 @@ export function Workbench({
                         />
                       </Field>
                       <Field label="急单等级">
-                        <select
+                        <UrgencySelect
                           name="urgency"
-                          defaultValue={selected.urgency}
-                          className={fieldClass()}
-                        >
-                          <option value="NORMAL">普通</option>
-                          <option value="URGENT">比较急</option>
-                          <option value="VERY_URGENT">特急</option>
-                        </select>
+                          value={selected.urgency}
+                        />
                       </Field>
                     </div>
                     <div className="rounded-md border border-zinc-200">
@@ -1679,7 +1767,7 @@ export function Workbench({
                     <button
                       type="submit"
                       disabled={Boolean(busy)}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-medium text-zinc-900 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-blue-600 bg-blue-600 px-4 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-blue-300 disabled:bg-blue-300"
                       title="保存详情"
                     >
                       <Save className="h-4 w-4" aria-hidden="true" />
@@ -1767,7 +1855,7 @@ export function Workbench({
                     onChange={(event) =>
                       setCompanyFilter(event.target.value as CompanyFilter)
                     }
-                    className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-sm"
+                    className={filterSelectClass()}
                   >
                     <option value="ALL">全部公司</option>
                     <option value="UNASSIGNED">未选公司</option>
@@ -1782,7 +1870,7 @@ export function Workbench({
                     onChange={(event) =>
                       setFactoryFilter(event.target.value as FactoryFilter)
                     }
-                    className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-sm"
+                    className={filterSelectClass()}
                   >
                     <option value="ALL">全部工厂</option>
                     <option value="UNASSIGNED">未选工厂</option>
@@ -1797,26 +1885,39 @@ export function Workbench({
                     onChange={(event) =>
                       setStatusFilter(event.target.value as StatusFilter)
                     }
-                    className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-sm"
+                    className={filterSelectClass(statusFilterTone(statusFilter))}
                   >
                     <option value="ALL">全部状态</option>
                     <option value="OPEN">未完成</option>
-                    <option value="PENDING">待核销</option>
-                    <option value="PARTIAL">部分交付</option>
-                    <option value="RETURNED">返厂修改</option>
-                    <option value="WRITTEN_OFF">已核销</option>
+                    {ORDER_STATUSES.map((status) => (
+                      <option
+                        key={status}
+                        value={status}
+                        style={statusOptionStyle[status]}
+                      >
+                        {statusLabels[status]}
+                      </option>
+                    ))}
                   </select>
                   <select
                     value={urgencyFilter}
                     onChange={(event) =>
                       setUrgencyFilter(event.target.value as UrgencyFilter)
                     }
-                    className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-sm"
+                    className={filterSelectClass(
+                      urgencyFilterTone(urgencyFilter),
+                    )}
                   >
                     <option value="ALL">全部急度</option>
-                    <option value="VERY_URGENT">特急</option>
-                    <option value="URGENT">比较急</option>
-                    <option value="NORMAL">普通</option>
+                    {[...URGENCY_LEVELS].reverse().map((level) => (
+                      <option
+                        key={level}
+                        value={level}
+                        style={urgencyOptionStyle[level]}
+                      >
+                        {urgencyLabels[level]}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
