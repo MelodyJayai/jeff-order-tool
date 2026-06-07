@@ -1,6 +1,6 @@
 {
   "name": "jeff-order-tool",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "scripts": {
     "dev": "next dev",
     "dev:lan": "next dev --hostname 0.0.0.0",
@@ -10,6 +10,8 @@
     "package:installer": "powershell -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
     "backup:daily": "node scripts/backup-sqlite.cjs",
     "export:postgres": "node scripts/export-sqlite-to-postgres.cjs",
+    "migrate:cloud-data": "node scripts/migrate-data-to-cloud.cjs",
+    "start:cloud": "node scripts/start-cloud.cjs",
     "start": "next start",
     "lint": "eslint"
   },

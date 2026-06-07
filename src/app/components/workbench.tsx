@@ -54,6 +54,7 @@ import {
 } from "@/lib/types";
 
 type WorkbenchProps = {
+  cloudMode: boolean;
   initialEvents: OrderEventRecord[];
   initialOrders: OrderRecord[];
   phoneAccess: PhoneAccess;
@@ -1076,6 +1077,7 @@ function MobileDetail({
 }
 
 export function Workbench({
+  cloudMode,
   initialEvents,
   initialOrders,
   phoneAccess,
@@ -1574,7 +1576,9 @@ export function Workbench({
               <ImportBackupCard busy={busy} onSubmit={submit} />
             ) : null}
 
-            {!isPhoneMode ? <UpdateCard busy={busy} onSubmit={submit} /> : null}
+            {!isPhoneMode && !cloudMode ? (
+              <UpdateCard busy={busy} onSubmit={submit} />
+            ) : null}
 
             <section className="rounded-md border border-zinc-200 bg-white">
               <div className="flex h-12 items-center gap-2 border-b border-zinc-200 px-4 text-sm font-semibold">

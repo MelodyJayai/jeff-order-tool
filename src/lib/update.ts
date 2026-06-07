@@ -1,5 +1,7 @@
 import packageJson from "../../package.json";
 
+import { areInAppUpdatesDisabled } from "@/lib/deployment";
+
 export type UpdateInfo = {
   ok: boolean;
   currentVersion: string;
@@ -220,6 +222,18 @@ async function checkGitHubReleaseUpdate(repository: string) {
 }
 
 export async function checkForUpdates(): Promise<UpdateInfo> {
+  if (areInAppUpdatesDisabled()) {
+    return info({
+      ok: true,
+      latestVersion: getCurrentVersion(),
+      updateAvailable: false,
+      assetName: null,
+      downloadUrl: null,
+      releaseUrl: null,
+      message: "云端版本由服务器维护更新",
+    });
+  }
+
   const manifestUrl = process.env.JEFF_UPDATE_MANIFEST_URL?.trim();
   const repository =
     process.env.JEFF_UPDATE_REPOSITORY?.trim() || DEFAULT_UPDATE_REPOSITORY;

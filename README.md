@@ -142,6 +142,23 @@ start-jeff-order-tool.cmd
 
 它会启动服务并打开本机页面。
 
+## 云端部署
+
+Jeff 现在需要多设备随时访问和编辑同一份订单数据时，建议使用云端版。云端版会固定数据目录、保留登录保护、隐藏 Windows 安装包更新按钮，并支持 Windows 云桌面试运行和 Docker 正式部署。
+
+详细步骤见：
+
+```text
+docs/cloud-deployment.zh.md
+```
+
+核心命令：
+
+```bash
+npm run migrate:cloud-data
+npm run start:cloud
+```
+
 ## Windows 绿色版
 
 后续优先给 Jeff 发安装包；绿色版保留给临时测试或无需安装的场景。

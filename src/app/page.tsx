@@ -1,6 +1,7 @@
 import { Workbench } from "@/app/components/workbench";
 import { requireAuthenticatedPage } from "@/lib/auth";
 import { chinaToday } from "@/lib/date";
+import { isCloudDeployment } from "@/lib/deployment";
 import { ensureDailyDatabaseBackup, listOrderEvents, listOrders } from "@/lib/db";
 import { getLanAccessUrls } from "@/lib/network";
 import QRCode from "qrcode";
@@ -25,6 +26,7 @@ export default async function Home() {
 
   return (
     <Workbench
+      cloudMode={isCloudDeployment()}
       initialEvents={events}
       initialOrders={orders}
       phoneAccess={{ primaryUrl, qrDataUrl, urls }}

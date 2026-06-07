@@ -10,6 +10,7 @@ import { z } from "zod";
 import { PRODUCT_COLUMNS } from "@/lib/catalog";
 import { ensureActionAuthenticated } from "@/lib/auth";
 import { chinaToday, cleanDate, optionalDate } from "@/lib/date";
+import { areInAppUpdatesDisabled } from "@/lib/deployment";
 import {
   createDatabaseBackupFile,
   createOrders,
@@ -520,6 +521,10 @@ async function downloadUpdateInstaller(
 export async function installUpdateAction(): Promise<ActionResult> {
   if (!(await ensureActionAuthenticated())) {
     return result(false, "请先登录后再操作");
+  }
+
+  if (areInAppUpdatesDisabled()) {
+    return result(false, "云端版本由服务器统一维护更新，不在网页内安装 Windows 更新包");
   }
 
   const update = await checkForUpdates();

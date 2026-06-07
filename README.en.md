@@ -142,6 +142,23 @@ http://192.168.1.20:3000
 
 The desktop page also shows a QR code for phone access when a private LAN address is detected.
 
+## Cloud Deployment
+
+For Jeff's multi-device workflow, use the cloud mode so phones and computers edit the same server-side data. Cloud mode keeps login protection, uses a fixed data directory, hides the Windows installer update card, and supports both a Windows cloud-desktop trial and a Docker deployment.
+
+Chinese deployment guide:
+
+```text
+docs/cloud-deployment.zh.md
+```
+
+Core commands:
+
+```bash
+npm run migrate:cloud-data
+npm run start:cloud
+```
+
 ## Windows Green Package
 
 For real end users, prefer the Windows installer. The green package is still useful for quick testing or portable use.
