@@ -159,6 +159,12 @@ npm run migrate:cloud-data
 npm run start:cloud
 ```
 
+天翼云桌面 Windows 试运行可直接使用：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\cloud\windows\setup-cloud-desktop.ps1
+```
+
 ## Windows 绿色版
 
 后续优先给 Jeff 发安装包；绿色版保留给临时测试或无需安装的场景。

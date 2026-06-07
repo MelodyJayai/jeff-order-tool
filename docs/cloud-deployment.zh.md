@@ -81,6 +81,31 @@ npm run migrate:cloud-data -- --from "D:\tools\JeffOrderTool-v0.1.8\JeffOrderToo
 
 在云桌面中安装 Node.js LTS 和 Git 后，进入项目目录：
 
+推荐优先使用一键部署脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\cloud\windows\setup-cloud-desktop.ps1 `
+  -AppDir . `
+  -DataDir "D:\JeffOrderToolCloud\data" `
+  -Port 3000 `
+  -PublicUrl "http://你的访问地址:3000" `
+  -AdminPassword "换成至少8位的强密码" `
+  -OldDataPath "D:\tools\JeffOrderTool-v0.1.8\JeffOrderTool\data"
+```
+
+这个脚本会自动完成：
+
+1. 检查 Node.js 和 npm。
+2. 创建或更新 `.env.cloud`。
+3. 安装依赖并执行生产构建。
+4. 在目标云端数据为空时迁移 Jeff 旧 `data` 目录。
+5. 注册登录后自动启动任务和每日备份任务。
+6. 启动服务并检查 `/api/health`。
+
+如果需要让同一私有网络或公网访问当前端口，可以显式增加 `-OpenFirewall`。这个参数会创建 Windows 防火墙入站规则，只开放当前端口的 Private/Domain 网络配置。
+
+下面是手动部署和排查命令。
+
 ```powershell
 npm ci
 npm run build
@@ -217,4 +242,3 @@ JEFF_COOKIE_SECURE=true
 - `/health` 页面显示数据库、订单数、备份目录正常。
 - 云桌面或服务器重启后，服务能自动恢复。
 - `backups` 目录里能看到每日备份文件。
-

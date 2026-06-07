@@ -159,6 +159,12 @@ npm run migrate:cloud-data
 npm run start:cloud
 ```
 
+For a Windows cloud-desktop trial, use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\cloud\windows\setup-cloud-desktop.ps1
+```
+
 ## Windows Green Package
 
 For real end users, prefer the Windows installer. The green package is still useful for quick testing or portable use.
