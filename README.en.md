@@ -220,14 +220,26 @@ It creates a desktop shortcut. Upgrade installs overwrite program files but keep
 
 ### Migrating From The Green Package To The Installer
 
-If a user has already entered data in the green package, send installer `0.1.10` or newer. On first launch, if the installer data folder does not yet contain `orders.db`, the launcher searches common locations such as Desktop, Downloads, and Documents for an old green-package `data/orders.db`. When it finds one, it copies the whole old `data` folder into the installed app directory.
+If a user has already entered data in the green package, send installer `0.1.12` or newer. On first launch, if the installer data folder does not yet contain `orders.db`, or if the installed database is still empty with no real orders, the launcher searches common locations such as Desktop, Downloads, Documents, and `D:\tools` for an old green-package `data/orders.db`. When it finds one, it copies the whole old `data` folder into the installed app directory.
+
+Jeff's current old green-package folder is:
+
+```text
+D:\tools\JeffOrderTool-v0.1.8
+```
+
+If it keeps the default archive structure, the real data is usually under:
+
+```text
+D:\tools\JeffOrderTool-v0.1.8\JeffOrderTool\data
+```
 
 Recommended user instructions:
 
 1. Do not delete the old green-package folder.
 2. Run the installer.
 3. Open Jeff Order Tool from the desktop shortcut.
-4. If the app says the old green-package data was imported, use only the desktop shortcut from then on.
+4. Confirm the old orders are still visible, then use only the desktop shortcut from then on.
 
 The in-app update card checks GitHub Releases by default:
 

@@ -102,9 +102,9 @@ internal static class JeffOrderToolLauncher
         {
             Directory.CreateDirectory(Path.GetDirectoryName(logPath));
 
-            if (File.Exists(targetDb) && new FileInfo(targetDb).Length > 0)
+            if (TargetHasExistingOrders(baseDir, targetDb, logPath))
             {
-                LogMigration(logPath, "skip: target database already exists");
+                LogMigration(logPath, "skip: target database already has orders");
                 return;
             }
 
@@ -134,14 +134,6 @@ internal static class JeffOrderToolLauncher
                 "migrated data from " + candidate.DataDir +
                 " size=" + candidate.Size.ToString() +
                 " updatedAt=" + candidate.UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss"));
-
-            MessageBox.Show(
-                "已自动导入旧版绿色版的数据。\n\n旧数据位置：\n" +
-                candidate.DataDir +
-                "\n\n以后请从桌面“Jeff订单工具”打开，后续更新也会走安装版自动更新。",
-                AppTitle,
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
@@ -152,6 +144,127 @@ internal static class JeffOrderToolLauncher
                 AppTitle,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
+        }
+    }
+
+    private static bool TargetHasExistingOrders(
+        string baseDir,
+        string targetDb,
+        string logPath)
+    {
+        if (!File.Exists(targetDb) || new FileInfo(targetDb).Length <= 0)
+        {
+            return false;
+        }
+
+        int? count = TryReadOrderCount(baseDir, targetDb, logPath);
+
+        if (count.HasValue)
+        {
+            return count.Value > 0;
+        }
+
+        LogMigration(
+            logPath,
+            "could not read target order count; keeping existing database safe");
+        return true;
+    }
+
+    private static int? TryReadOrderCount(
+        string baseDir,
+        string targetDb,
+        string logPath)
+    {
+        string nodeExe = Path.Combine(baseDir, "runtime", "node.exe");
+        string serverDir = Path.Combine(baseDir, "server");
+
+        if (!File.Exists(nodeExe) || !Directory.Exists(serverDir))
+        {
+            return null;
+        }
+
+        string scriptPath = Path.Combine(baseDir, "logs", "read-order-count.js");
+        string script =
+            "const Database = require('better-sqlite3');\n" +
+            "const db = new Database(process.argv[2], { readonly: true, fileMustExist: true });\n" +
+            "let count = 0;\n" +
+            "const row = db.prepare(\"SELECT name FROM sqlite_master WHERE type='table' AND name='orders'\").get();\n" +
+            "if (row) count = db.prepare(\"SELECT COUNT(*) AS count FROM orders\").get().count || 0;\n" +
+            "db.close();\n" +
+            "console.log(String(count));\n";
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(scriptPath));
+            File.WriteAllText(scriptPath, script, Encoding.UTF8);
+
+            var info = new ProcessStartInfo
+            {
+                FileName = nodeExe,
+                Arguments = QuoteForArgument(scriptPath) + " " + QuoteForArgument(targetDb),
+                WorkingDirectory = serverDir,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+
+            using (Process process = Process.Start(info))
+            {
+                if (process == null)
+                {
+                    return null;
+                }
+
+                if (!process.WaitForExit(5000))
+                {
+                    try
+                    {
+                        process.Kill();
+                    }
+                    catch
+                    {
+                    }
+
+                    return null;
+                }
+
+                string output = process.StandardOutput.ReadToEnd().Trim();
+                string error = process.StandardError.ReadToEnd().Trim();
+                int count;
+
+                if (error.Length > 0)
+                {
+                    LogMigration(logPath, "read-order-count stderr: " + error);
+                }
+
+                if (process.ExitCode == 0 && int.TryParse(output, out count))
+                {
+                    return count;
+                }
+
+                LogMigration(
+                    logPath,
+                    "read-order-count failed exit=" + process.ExitCode.ToString() +
+                    " output=" + output);
+                return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            LogMigration(logPath, "read-order-count exception: " + ex.Message);
+            return null;
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(scriptPath);
+            }
+            catch
+            {
+            }
         }
     }
 
@@ -195,11 +308,19 @@ internal static class JeffOrderToolLauncher
         AddRoot(roots, Path.Combine(userProfile, "Documents"));
         AddRoot(roots, Path.Combine(userProfile, "OneDrive", "Desktop"));
         AddRoot(roots, Path.Combine(userProfile, "OneDrive", "Documents"));
+        AddRoot(roots, @"D:\tools");
+        AddRoot(roots, @"D:\tools\JeffOrderTool-v0.1.8");
 
         if (!string.IsNullOrWhiteSpace(oneDrive))
         {
             AddRoot(roots, Path.Combine(oneDrive, "Desktop"));
             AddRoot(roots, Path.Combine(oneDrive, "Documents"));
+        }
+
+        foreach (string drive in Environment.GetLogicalDrives())
+        {
+            AddRoot(roots, Path.Combine(drive, "tools"));
+            AddRoot(roots, Path.Combine(drive, "Tools"));
         }
 
         return roots;
@@ -610,6 +731,11 @@ internal static class JeffOrderToolLauncher
     private static string QuoteForPowerShell(string value)
     {
         return "'" + value.Replace("'", "''") + "'";
+    }
+
+    private static string QuoteForArgument(string value)
+    {
+        return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
     }
 
     private static bool SameDirectory(string left, string right)
