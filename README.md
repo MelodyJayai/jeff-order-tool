@@ -248,7 +248,7 @@ npm run package:installer
 release-installers/JeffOrderToolSetup-v版本号.exe
 ```
 
-当前建议给 Jeff 发送 `release-installers/JeffOrderToolSetup-v0.1.17.exe`。该版本保留 `0.1.16` 已验证的先交要求和旧版 `.db` 导入能力，并优化订单总表和待核销明细里的数量显示。
+当前建议给 Jeff 发送 `release-installers/JeffOrderToolSetup-v0.1.18.exe`。该版本保留 `0.1.16` 已验证的先交要求和旧版 `.db` 导入能力，包含 `0.1.17` 的数量显示优化，并增强在线更新后关闭旧服务和重新启动后台服务的稳定性。
 
 安装包默认安装到当前 Windows 用户目录：
 

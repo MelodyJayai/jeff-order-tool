@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -81,7 +82,41 @@ internal static class JeffOrderToolUpdater
             TryDelete(pidPath);
         }
 
+        StopProcessesByAppDirectory(appDir, logPath);
         Thread.Sleep(1000);
+    }
+
+    private static void StopProcessesByAppDirectory(string appDir, string logPath)
+    {
+        string normalizedAppDir = Path.GetFullPath(appDir)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string script =
+            "$dir = " + QuoteForPowerShell(normalizedAppDir) + "\r\n" +
+            "$escaped = $dir.Replace('\\','\\\\')\r\n" +
+            "Get-CimInstance Win32_Process | Where-Object {\r\n" +
+            "  ($_.Name -eq 'node.exe' -or $_.Name -eq 'cmd.exe') -and\r\n" +
+            "  $_.CommandLine -and\r\n" +
+            "  ($_.CommandLine -like ('*' + $dir + '*') -or\r\n" +
+            "   $_.CommandLine -like ('*' + $escaped + '*'))\r\n" +
+            "} | ForEach-Object { taskkill.exe /PID $_.ProcessId /T /F | Out-Null }\r\n";
+        string scriptPath = Path.Combine(appDir, "logs", "stop-update-processes.ps1");
+
+        try
+        {
+            File.WriteAllText(scriptPath, script);
+            Log(logPath, "stopping processes under app directory");
+            RunProcess(
+                "powershell.exe",
+                "-NoProfile -ExecutionPolicy Bypass -File " +
+                    QuoteForArgument(scriptPath),
+                appDir,
+                logPath,
+                12000);
+        }
+        catch (Exception ex)
+        {
+            Log(logPath, "process scan stop failed: " + ex.Message);
+        }
     }
 
     private static void RunInstaller(string installerPath, string appDir, string logPath)
@@ -107,8 +142,7 @@ internal static class JeffOrderToolUpdater
 
         if (!File.Exists(launcherPath))
         {
-            Log(logPath, "launcher not found after update");
-            return;
+            throw new FileNotFoundException("安装完成后找不到启动器", launcherPath);
         }
 
         Process.Start(new ProcessStartInfo
@@ -119,6 +153,58 @@ internal static class JeffOrderToolUpdater
         });
 
         Log(logPath, "launcher started");
+
+        if (!WaitForServerReady(logPath, TimeSpan.FromSeconds(75)))
+        {
+            Log(logPath, "server was not confirmed ready after launcher start");
+            MessageBox.Show(
+                "安装包已运行完成，但没有确认后台服务成功启动。\n\n" +
+                "请双击桌面“Jeff订单工具”重新打开；如果仍然打不开，请把 logs\\updater.log 和 logs\\server.log 发给开发人员。",
+                AppTitle,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+    }
+
+    private static bool WaitForServerReady(string logPath, TimeSpan timeout)
+    {
+        string healthUrl = "http://127.0.0.1:3000/api/health";
+        DateTime deadline = DateTime.Now.Add(timeout);
+
+        while (DateTime.Now < deadline)
+        {
+            try
+            {
+                var request = (HttpWebRequest)WebRequest.Create(healthUrl);
+                request.Timeout = 1000;
+                request.ReadWriteTimeout = 1000;
+
+                using (var response = (HttpWebResponse)request.GetResponse())
+                {
+                    if ((int)response.StatusCode >= 200 &&
+                        (int)response.StatusCode < 500)
+                    {
+                        using (var reader = new StreamReader(response.GetResponseStream()))
+                        {
+                            string body = reader.ReadToEnd();
+
+                            if (body.Contains("jeff-order-tool"))
+                            {
+                                Log(logPath, "server ready after update");
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            Thread.Sleep(1000);
+        }
+
+        return false;
     }
 
     private static int RunProcess(
@@ -191,6 +277,11 @@ internal static class JeffOrderToolUpdater
     private static string QuoteForArgument(string value)
     {
         return "\"" + value.Replace("\"", "\\\"") + "\"";
+    }
+
+    private static string QuoteForPowerShell(string value)
+    {
+        return "'" + value.Replace("'", "''") + "'";
     }
 
     private static void TryDelete(string path)

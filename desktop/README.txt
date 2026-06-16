@@ -14,7 +14,8 @@ Jeff订单工具使用说明
 12. 两台电脑不要分别双击运行两套工具；只在一台电脑上双击打开工具，另一台电脑用浏览器打开页面里的“手机/其他电脑访问”地址。
 13. 手机和电脑连同一个 Wi-Fi 时，可以扫电脑页面里的“手机/其他电脑访问”二维码。
 14. 如果 Windows 防火墙提示，允许在专用网络访问。
-15. 如果密码忘记或重启后无法登录，打开 SupportFiles 文件夹，双击 ResetJeffOrderToolPassword.exe，然后重新设置密码；订单数据不会删除。
-16. 如果提示启动超时，把 logs 文件夹里的 server.log 发给开发人员。
+15. 如果在线更新后浏览器提示 127.0.0.1 拒绝连接，请等 30 秒后双击桌面“Jeff订单工具”重新打开。
+16. 如果密码忘记或重启后无法登录，打开 SupportFiles 文件夹，双击 ResetJeffOrderToolPassword.exe，然后重新设置密码；订单数据不会删除。
+17. 如果提示启动超时，把 logs 文件夹里的 server.log 和 updater.log 发给开发人员。
 
 请不要删除 server、runtime、data、SupportFiles 文件夹。

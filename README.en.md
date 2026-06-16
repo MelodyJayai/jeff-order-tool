@@ -246,7 +246,7 @@ Output:
 release-installers/JeffOrderToolSetup-vVERSION.exe
 ```
 
-For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.17.exe`. It keeps the first-delivery request and legacy `.db` import features validated in `0.1.16`, and improves quantity-summary readability.
+For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.18.exe`. It keeps the first-delivery request and legacy `.db` import features validated in `0.1.16`, includes the `0.1.17` quantity-summary readability improvement, and makes the in-app updater more reliable when stopping the old service and restarting the tool.
 
 The installer defaults to the current Windows user's local app directory:
 
