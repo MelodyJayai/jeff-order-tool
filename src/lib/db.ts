@@ -8,7 +8,7 @@ import {
   calculateTotalQuantity,
   type ProductQuantityKey,
 } from "@/lib/catalog";
-import { chinaToday, nowIso } from "@/lib/date";
+import { chinaToday, cleanDate, nowIso, optionalDate } from "@/lib/date";
 import type {
   CreateOrdersInput,
   ImportOrderInput,
@@ -27,6 +27,7 @@ type OrderRow = {
   code: string;
   company_name: string | null;
   factory_name: string | null;
+  first_delivery: string | null;
   customer_name: string | null;
   product_name: string | null;
   quantity: number;
@@ -74,7 +75,7 @@ const DB_PATH = process.env.JEFF_ORDER_DB_PATH
 const BACKUP_DIR = process.env.JEFF_BACKUP_DIR
   ? path.resolve(process.env.JEFF_BACKUP_DIR)
   : path.join(path.dirname(DB_PATH), "backups");
-const SCHEMA_VERSION = "2026-06-07-v4-return-quantities";
+const SCHEMA_VERSION = "2026-06-08-v5-first-delivery";
 
 function productValues(input: Record<ProductQuantityKey, number>) {
   return {
@@ -134,6 +135,76 @@ function returnQuantityTotal(
   );
 }
 
+function tableExists(db: Database.Database, table: string) {
+  return Boolean(
+    db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(table),
+  );
+}
+
+function tableColumns(db: Database.Database, table: string) {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+    name: string;
+  }>;
+
+  return new Set(rows.map((row) => row.name));
+}
+
+function textValue(row: Record<string, unknown>, key: string, fallback = "") {
+  const value = row[key];
+
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  return String(value).trim();
+}
+
+function positiveValue(
+  row: Record<string, unknown>,
+  key: string,
+  fallback = 0,
+) {
+  const value = Number.parseInt(textValue(row, key), 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function nullablePositiveValue(row: Record<string, unknown>, key: string) {
+  const value = positiveValue(row, key, 0);
+  return value > 0 ? value : null;
+}
+
+function sqliteImportStatus(
+  row: Record<string, unknown>,
+  writtenOffAt: string | null,
+  returnedAt: string | null,
+): OrderStatus {
+  const status = toStatus(textValue(row, "status"));
+
+  if (status !== "PENDING") {
+    return status;
+  }
+
+  if (returnedAt) {
+    return "RETURNED";
+  }
+
+  if (writtenOffAt) {
+    return "WRITTEN_OFF";
+  }
+
+  if (
+    nullablePositiveValue(row, "partial_quantity") ||
+    optionalDate(textValue(row, "partial_date")) ||
+    textValue(row, "partial_note")
+  ) {
+    return "PARTIAL";
+  }
+
+  return "PENDING";
+}
+
 function returnQuantityLimitMessage(
   input: ReturnOrderInput,
   order: OrderRecord,
@@ -182,6 +253,7 @@ function createOrdersTableSql(tableName: string) {
       code TEXT NOT NULL COLLATE NOCASE,
       company_name TEXT,
       factory_name TEXT,
+      first_delivery TEXT,
       customer_name TEXT,
       product_name TEXT,
       quantity INTEGER NOT NULL DEFAULT 1,
@@ -247,7 +319,7 @@ function rebuildOrdersWithoutGlobalCodeUnique(db: Database.Database) {
       db.exec(createOrdersTableSql("orders_v3_company_code"));
       db.exec(`
         INSERT INTO orders_v3_company_code (
-          id, code, company_name, factory_name, customer_name, product_name,
+          id, code, company_name, factory_name, first_delivery, customer_name, product_name,
           quantity, suit_quantity, jacket_quantity, pant_quantity,
           vest_quantity, coat_quantity, extra_fee, registered_at, status,
           written_off_at, returned_at, return_note,
@@ -256,7 +328,7 @@ function rebuildOrdersWithoutGlobalCodeUnique(db: Database.Database) {
           partial_quantity, partial_date, partial_note, note, created_at, updated_at
         )
         SELECT
-          id, code, company_name, factory_name, customer_name, product_name,
+          id, code, company_name, factory_name, first_delivery, customer_name, product_name,
           quantity, suit_quantity, jacket_quantity, pant_quantity,
           vest_quantity, coat_quantity, extra_fee, registered_at, status,
           written_off_at, returned_at, return_note,
@@ -353,6 +425,7 @@ function ensureSchema(db: Database.Database) {
 
   ensureColumn(db, "orders", "company_name", "company_name TEXT");
   ensureColumn(db, "orders", "factory_name", "factory_name TEXT");
+  ensureColumn(db, "orders", "first_delivery", "first_delivery TEXT");
   ensureColumn(
     db,
     "orders",
@@ -423,6 +496,7 @@ function ensureSchema(db: Database.Database) {
   recordMigration(db, "2026-06-06-v2-company-factory");
   recordMigration(db, "2026-06-07-v3-company-code-identity");
   recordMigration(db, "2026-06-07-v4-return-quantities");
+  recordMigration(db, "2026-06-08-v5-first-delivery");
   setMeta(db, "schema_version", SCHEMA_VERSION);
   setMeta(db, "app_name", "jeff-order-tool");
 }
@@ -479,6 +553,7 @@ function mapOrder(row: OrderRow): OrderRecord {
     code: row.code,
     companyName: row.company_name ?? "",
     factoryName: row.factory_name ?? "",
+    firstDelivery: row.first_delivery ?? "",
     customerName: row.customer_name ?? "",
     quantity: row.quantity,
     ...quantities,
@@ -786,13 +861,13 @@ export function createOrders(input: CreateOrdersInput) {
 
     const insert = db.prepare(`
       INSERT INTO orders (
-        id, code, company_name, factory_name, customer_name, quantity,
+        id, code, company_name, factory_name, first_delivery, customer_name, quantity,
         suit_quantity, jacket_quantity, pant_quantity, vest_quantity,
         coat_quantity, registered_at, status, urgency, note,
         created_at, updated_at
       )
       VALUES (
-        @id, @code, @companyName, @factoryName, @customerName, @quantity,
+        @id, @code, @companyName, @factoryName, @firstDelivery, @customerName, @quantity,
         @suitQuantity, @jacketQuantity, @pantQuantity, @vestQuantity,
         @coatQuantity, @registeredAt, 'PENDING', @urgency, @note,
         @createdAt, @updatedAt
@@ -813,6 +888,7 @@ export function createOrders(input: CreateOrdersInput) {
         code,
         companyName: input.companyName || null,
         factoryName: input.factoryName || null,
+        firstDelivery: input.firstDelivery || null,
         customerName: input.customerName || null,
         quantity,
         ...quantities,
@@ -826,7 +902,9 @@ export function createOrders(input: CreateOrdersInput) {
         db,
         id,
         "CREATED",
-        `登记号码 ${code}；公司 ${input.companyName || "未选公司"}`,
+        `登记号码 ${code}；公司 ${input.companyName || "未选公司"}${
+          input.firstDelivery ? `；${input.firstDelivery}` : ""
+        }`,
       );
       created += 1;
     }
@@ -846,7 +924,7 @@ export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
 
     const insert = db.prepare(`
       INSERT INTO orders (
-        id, code, company_name, factory_name, customer_name, quantity,
+        id, code, company_name, factory_name, first_delivery, customer_name, quantity,
         suit_quantity, jacket_quantity, pant_quantity, vest_quantity,
         coat_quantity, registered_at, status, written_off_at, urgency,
         returned_at, return_note, return_suit_quantity, return_jacket_quantity,
@@ -855,7 +933,7 @@ export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
         created_at, updated_at
       )
       VALUES (
-        @id, @code, @companyName, @factoryName, @customerName, @quantity,
+        @id, @code, @companyName, @factoryName, @firstDelivery, @customerName, @quantity,
         @suitQuantity, @jacketQuantity, @pantQuantity, @vestQuantity,
         @coatQuantity, @registeredAt, @status, @writtenOffAt, @urgency,
         @returnedAt, @returnNote, @returnSuitQuantity, @returnJacketQuantity,
@@ -868,6 +946,7 @@ export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
       UPDATE orders
       SET company_name = @companyName,
           factory_name = @factoryName,
+          first_delivery = @firstDelivery,
           customer_name = @customerName,
           quantity = @quantity,
           suit_quantity = @suitQuantity,
@@ -911,6 +990,7 @@ export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
         code,
         companyName: item.companyName || null,
         factoryName: item.factoryName || null,
+        firstDelivery: item.firstDelivery || null,
         customerName: item.customerName || null,
         quantity,
         ...quantities,
@@ -944,6 +1024,81 @@ export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
   })();
 }
 
+export function importOrdersFromSqliteBackup(sourcePath: string) {
+  const sourceDb = new Database(sourcePath, {
+    fileMustExist: true,
+    readonly: true,
+  });
+
+  try {
+    if (!tableExists(sourceDb, "orders")) {
+      return { created: 0, updated: 0, skipped: ["文件里没有 orders 表"] };
+    }
+
+    const columns = tableColumns(sourceDb, "orders");
+
+    if (!columns.has("code")) {
+      return { created: 0, updated: 0, skipped: ["orders 表里没有订单号字段"] };
+    }
+
+    const orderBy = columns.has("created_at") ? " ORDER BY created_at" : "";
+    const rows = sourceDb
+      .prepare(`SELECT * FROM orders${orderBy}`)
+      .all() as Array<Record<string, unknown>>;
+    const importRows = rows.flatMap((row): ImportOrderInput[] => {
+      const code = textValue(row, "code");
+
+      if (!code) {
+        return [];
+      }
+
+      const writtenOffAt = optionalDate(textValue(row, "written_off_at"));
+      const returnedAt = optionalDate(textValue(row, "returned_at"));
+      const status = sqliteImportStatus(row, writtenOffAt, returnedAt);
+
+      return [
+        {
+          code,
+          codes: [code],
+          companyName: textValue(row, "company_name"),
+          factoryName: textValue(row, "factory_name"),
+          firstDelivery: textValue(row, "first_delivery"),
+          customerName: textValue(row, "customer_name"),
+          quantity: positiveValue(row, "quantity", 1),
+          suitQuantity: positiveValue(row, "suit_quantity"),
+          jacketQuantity: positiveValue(row, "jacket_quantity"),
+          pantQuantity: positiveValue(row, "pant_quantity"),
+          vestQuantity: positiveValue(row, "vest_quantity"),
+          coatQuantity: positiveValue(row, "coat_quantity"),
+          registeredAt: cleanDate(textValue(row, "registered_at"), chinaToday()),
+          status,
+          writtenOffAt,
+          returnedAt,
+          returnNote: textValue(row, "return_note"),
+          returnSuitQuantity: positiveValue(row, "return_suit_quantity"),
+          returnJacketQuantity: positiveValue(row, "return_jacket_quantity"),
+          returnPantQuantity: positiveValue(row, "return_pant_quantity"),
+          returnVestQuantity: positiveValue(row, "return_vest_quantity"),
+          returnCoatQuantity: positiveValue(row, "return_coat_quantity"),
+          urgency: toUrgency(textValue(row, "urgency")),
+          partialQuantity: nullablePositiveValue(row, "partial_quantity"),
+          partialDate: optionalDate(textValue(row, "partial_date")),
+          partialNote: textValue(row, "partial_note"),
+          note: textValue(row, "note"),
+        },
+      ];
+    });
+
+    if (importRows.length === 0) {
+      return { created: 0, updated: 0, skipped: ["没有找到可导入的订单号"] };
+    }
+
+    return importOrders(importRows);
+  } finally {
+    sourceDb.close();
+  }
+}
+
 export function updateOrder(input: UpdateOrderInput) {
   const db = getDb();
   const current = getOrder(input.id);
@@ -975,6 +1130,7 @@ export function updateOrder(input: UpdateOrderInput) {
       UPDATE orders
       SET company_name = @companyName,
           factory_name = @factoryName,
+          first_delivery = @firstDelivery,
           customer_name = @customerName,
           quantity = @quantity,
           suit_quantity = @suitQuantity,
@@ -995,6 +1151,7 @@ export function updateOrder(input: UpdateOrderInput) {
       id: input.id,
       companyName: input.companyName || null,
       factoryName: input.factoryName || null,
+      firstDelivery: input.firstDelivery || null,
       customerName: input.customerName || null,
       quantity,
       ...quantities,

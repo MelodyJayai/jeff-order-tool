@@ -49,6 +49,7 @@ const lines = [
   code TEXT NOT NULL,
   company_name TEXT,
   factory_name TEXT,
+  first_delivery TEXT,
   customer_name TEXT,
   product_name TEXT,
   quantity INTEGER NOT NULL DEFAULT 1,

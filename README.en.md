@@ -15,6 +15,8 @@ Many small workshops do not need a full ERP system. They need a practical tool t
 - Register an order number.
 - Select the company and factory for an order.
 - Record quantities by product type.
+- See pending write-off quantities by product type.
+- Mark what the customer wants to deliver first before the full order is done.
 - Search an order number quickly.
 - Mark an order as shipped.
 - Mark returned-for-alteration items by product type after shipment.
@@ -48,16 +50,20 @@ If `JEFF_ADMIN_PASSWORD` is set, the app uses it and skips the first-setup page.
 - Search by order number.
 - Shipment write-off with automatic shipment date.
 - Returned-for-alteration workflow after shipment, with quantities recorded by fine category.
+- First-delivery request selection, such as "deliver one suit first" or "deliver pants first".
 - Fine category quantities:
   - Suit set
   - Shirt / top
   - Pants
   - Vest
   - Coat
+- Pending write-off quantity summary by fine category.
+- Paired quantity labels, such as "Suit set 128" and "Shirt 98", so totals are easier to read.
 - Urgency levels.
-- Partial delivery quantity/date/note fields.
+- Partial delivery quantity/date/note fields, kept separate from first-delivery requests.
 - CSV export.
 - CSV import with order-number based update/insert.
+- Legacy SQLite `.db` backup import, useful when migrating from the old portable package to the installed version.
 - Operation log page for registration, updates, partial delivery, write-off, returned alterations, returned-alteration completion, and undo.
 - Consistent SQLite backup download.
 - Login protection with first-run admin password setup.
@@ -83,7 +89,7 @@ The database is designed with future migration in mind:
 - Orders use stable internal IDs.
 - Order numbers are stored as searchable structured fields.
 - Dates are stored as text dates.
-- Company, factory, shipment status, returned-alteration quantities, urgency, and fine-category quantities are structured fields.
+- Company, factory, first-delivery request, shipment status, returned-alteration quantities, urgency, and fine-category quantities are structured fields.
 - The database records `schema_version` and `schema_migrations`.
 
 Company and factory options are maintained in:
@@ -239,6 +245,8 @@ Output:
 ```text
 release-installers/JeffOrderToolSetup-vVERSION.exe
 ```
+
+For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.17.exe`. It keeps the first-delivery request and legacy `.db` import features validated in `0.1.16`, and improves quantity-summary readability.
 
 The installer defaults to the current Windows user's local app directory:
 

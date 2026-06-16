@@ -2,6 +2,7 @@
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { revalidatePath } from "next/cache";
@@ -16,6 +17,7 @@ import {
   createOrders,
   getDataDirectory,
   importOrders,
+  importOrdersFromSqliteBackup,
   markOrderReturned,
   undoWriteOffOrder,
   updateOrder,
@@ -253,6 +255,12 @@ function csvImportRows(csvText: string): ImportOrderInput[] {
         codes: [code],
         companyName: rowValue(row, ["公司", "公司名称", "company", "company name"]),
         factoryName: rowValue(row, ["工厂", "加工厂", "factory", "factory name"]),
+        firstDelivery: rowValue(row, [
+          "先交",
+          "先交要求",
+          "first delivery",
+          "early delivery",
+        ]),
         customerName: rowValue(row, ["客户", "客户名", "customer", "customer name"]),
         suitQuantity: csvInt(rowValue(row, ["套装", "suit set", "suit"])),
         jacketQuantity: csvInt(rowValue(row, ["单衫", "shirt", "top"])),
@@ -310,6 +318,7 @@ export async function createOrdersAction(
     codes,
     companyName,
     factoryName: text(formData, "factoryName"),
+    firstDelivery: text(formData, "firstDelivery"),
     customerName: text(formData, "customerName"),
     quantity: positiveInt(formData, "quantity"),
     ...productQuantities(formData),
@@ -353,6 +362,7 @@ export async function updateOrderAction(
     id,
     companyName: text(formData, "companyName"),
     factoryName: text(formData, "factoryName"),
+    firstDelivery: text(formData, "firstDelivery"),
     customerName: text(formData, "customerName"),
     quantity: positiveInt(formData, "quantity"),
     ...productQuantities(formData),
@@ -621,4 +631,66 @@ export async function importCsvAction(
     `导入完成：新增 ${imported.created} 条，更新 ${imported.updated} 条；导入前已自动备份 ${backupFilename}`,
     imported.skipped,
   );
+}
+
+export async function importSqliteBackupAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  if (!(await ensureActionAuthenticated())) {
+    return result(false, "请先登录后再操作");
+  }
+
+  const file = formData.get("dbFile");
+
+  if (!(file instanceof File)) {
+    return result(false, "请选择旧版 .db 备份文件");
+  }
+
+  if (file.size === 0) {
+    return result(false, "选择的 .db 文件是空的");
+  }
+
+  let backupFilename = "";
+
+  try {
+    const backup = await createDatabaseBackupFile("before-sqlite-import");
+    backupFilename = backup.filename;
+  } catch {
+    return result(false, "导入旧库前自动备份失败，已停止导入");
+  }
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "jeff-sqlite-import-"));
+  const tempDbPath = path.join(tempDir, "source.db");
+
+  try {
+    fs.writeFileSync(tempDbPath, Buffer.from(await file.arrayBuffer()));
+    const imported = importOrdersFromSqliteBackup(tempDbPath);
+
+    revalidatePath("/");
+    revalidatePath("/events");
+    revalidatePath("/health");
+
+    if (imported.created === 0 && imported.updated === 0) {
+      return result(
+        false,
+        `没有导入订单；导入前已自动备份 ${backupFilename}`,
+        imported.skipped,
+      );
+    }
+
+    return result(
+      true,
+      `旧版 .db 导入完成：新增 ${imported.created} 条，更新 ${imported.updated} 条；导入前已自动备份 ${backupFilename}`,
+      imported.skipped,
+    );
+  } catch (error) {
+    return result(
+      false,
+      error instanceof Error
+        ? `旧版 .db 导入失败：${error.message}`
+        : "旧版 .db 导入失败",
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 }

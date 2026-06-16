@@ -23,6 +23,7 @@ export type OrderRecord = {
   code: string;
   companyName: string;
   factoryName: string;
+  firstDelivery: string;
   customerName: string;
   quantity: number;
   suitQuantity: number;
@@ -62,6 +63,7 @@ export type CreateOrdersInput = {
   codes: string[];
   companyName: string;
   factoryName: string;
+  firstDelivery: string;
   customerName: string;
   quantity: number;
   suitQuantity: number;
@@ -94,6 +96,7 @@ export type UpdateOrderInput = {
   id: string;
   companyName: string;
   factoryName: string;
+  firstDelivery: string;
   customerName: string;
   quantity: number;
   suitQuantity: number;

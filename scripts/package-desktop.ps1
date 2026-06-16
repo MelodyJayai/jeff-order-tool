@@ -1,7 +1,11 @@
 $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
-$sourceDir = Join-Path $root "release\JeffOrderTool"
+$sourceDir = if ($env:JEFF_DESKTOP_APP_DIR) {
+  $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:JEFF_DESKTOP_APP_DIR)
+} else {
+  Join-Path $root "release\JeffOrderTool"
+}
 $packageRoot = Join-Path $root "release-package"
 $cleanDir = Join-Path $packageRoot "JeffOrderTool"
 $archiveDir = Join-Path $root "release-archives"

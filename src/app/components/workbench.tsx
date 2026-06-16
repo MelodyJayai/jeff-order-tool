@@ -27,6 +27,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   createOrdersAction,
   importCsvAction,
+  importSqliteBackupAction,
   installUpdateAction,
   markReturnedOrderAction,
   undoWriteOffOrderAction,
@@ -41,6 +42,7 @@ import {
 } from "@/lib/catalog";
 import { COMPANY_OPTIONS, FACTORY_OPTIONS } from "@/lib/companies";
 import { formatDateTime } from "@/lib/date";
+import { FIRST_DELIVERY_OPTIONS } from "@/lib/first-delivery";
 import {
   ORDER_STATUSES,
   URGENCY_LEVELS,
@@ -102,6 +104,7 @@ const urgencyTone: Record<UrgencyLevel, string> = {
   URGENT: "border-yellow-300 bg-yellow-50 text-yellow-800",
   VERY_URGENT: "border-red-200 bg-red-50 text-red-800",
 };
+const firstDeliveryTone = "border-orange-200 bg-orange-50 text-orange-800";
 
 const controlBaseClass =
   "h-10 w-full rounded-md border px-3 text-sm outline-none transition focus:ring-2";
@@ -231,6 +234,10 @@ function orderQuantity(order: OrderRecord) {
   return categoryTotal > 0 ? categoryTotal : order.quantity;
 }
 
+function orderCategoryQuantity(order: OrderRecord) {
+  return calculateTotalQuantity(quantityValues(order));
+}
+
 function returnSummary(order: OrderRecord) {
   return PRODUCT_COLUMNS.filter(
     (item) => order[returnQuantityKeys[item.key]] > 0,
@@ -254,6 +261,7 @@ function orderMatches(order: OrderRecord, query: string) {
     order.code,
     order.companyName,
     order.factoryName,
+    order.firstDelivery,
     order.customerName,
     order.note,
     order.partialNote,
@@ -425,6 +433,43 @@ function Badge({
     >
       {children}
     </span>
+  );
+}
+
+function QuantityPair({
+  label,
+  value,
+  large = false,
+  emphasis = false,
+}: {
+  label: string;
+  value: number;
+  large?: boolean;
+  emphasis?: boolean;
+}) {
+  return (
+    <div
+      className="inline-flex min-w-0 items-baseline gap-1.5 whitespace-nowrap"
+      aria-label={`${label}${value}`}
+    >
+      <span
+        className={cn(
+          "font-medium",
+          emphasis ? "text-blue-800" : "text-zinc-500",
+        )}
+      >
+        {label}
+      </span>
+      <span
+        className={cn(
+          "font-semibold",
+          large ? "text-xl" : "text-sm",
+          emphasis ? "text-blue-900" : "text-zinc-950",
+        )}
+      >
+        {value}
+      </span>
+    </div>
   );
 }
 
@@ -664,6 +709,34 @@ function ImportBackupCard({
             {busy === "导入" ? "导入中" : "导入订单"}
           </button>
         </form>
+        <form
+          onSubmit={(event) =>
+            onSubmit(event, importSqliteBackupAction, "导入旧库", true)
+          }
+          className="grid gap-2 border-t border-zinc-100 pt-3"
+        >
+          <Field label="导入旧版 .db 备份">
+            <input
+              name="dbFile"
+              type="file"
+              accept=".db,application/octet-stream,application/x-sqlite3"
+              className="block w-full text-sm text-zinc-700 file:mr-3 file:h-9 file:rounded-md file:border-0 file:bg-zinc-950 file:px-3 file:text-sm file:font-medium file:text-white"
+              required
+            />
+          </Field>
+          <button
+            type="submit"
+            disabled={Boolean(busy)}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-medium text-zinc-900 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+            title="导入旧版数据库备份"
+          >
+            <Upload className="h-4 w-4" aria-hidden="true" />
+            {busy === "导入旧库" ? "导入中" : "导入旧版 .db"}
+          </button>
+          <div className="text-xs leading-5 text-zinc-500">
+            用于导入旧绿色版或备份目录里的 `jeff-order-*.db`，导入前会自动备份当前数据。
+          </div>
+        </form>
       </div>
     </section>
   );
@@ -878,12 +951,16 @@ function OrderRow({
               {urgencyLabels[order.urgency]}
             </Badge>
           ) : null}
+          {order.firstDelivery ? (
+            <Badge className={firstDeliveryTone}>先交</Badge>
+          ) : null}
         </div>
       </div>
       <div className={cn("flex flex-wrap gap-x-4 gap-y-1 text-xs", subTone)}>
         <span>登记 {order.registeredAt}</span>
         <span>出货 {dateText(order.writtenOffAt)}</span>
         <span>数量 {orderQuantity(order)}</span>
+        {order.firstDelivery ? <span>{order.firstDelivery}</span> : null}
         {summary ? <span>{summary}</span> : null}
         {returnedSummary ? (
           <span>
@@ -927,6 +1004,9 @@ function MobileDetail({
           <Badge className={urgencyTone[order.urgency]}>
             {urgencyLabels[order.urgency]}
           </Badge>
+          {order.firstDelivery ? (
+            <Badge className={firstDeliveryTone}>{order.firstDelivery}</Badge>
+          ) : null}
         </div>
       </div>
 
@@ -949,6 +1029,14 @@ function MobileDetail({
             {order.customerName || "未填写"}
           </span>
         </div>
+        {order.firstDelivery ? (
+          <div className="flex justify-between gap-3">
+            <span className="text-zinc-500">先交要求</span>
+            <span className="text-right font-semibold text-orange-800">
+              {order.firstDelivery}
+            </span>
+          </div>
+        ) : null}
         <div className="flex justify-between gap-3">
           <span className="text-zinc-500">登记日期</span>
           <span className="font-medium text-zinc-950">{order.registeredAt}</span>
@@ -983,12 +1071,9 @@ function MobileDetail({
           {PRODUCT_COLUMNS.map((item) => (
             <div
               key={item.key}
-              className="flex items-center justify-between gap-3"
+              className="flex items-center justify-start"
             >
-              <span className="text-zinc-500">{item.label}</span>
-              <span className="font-semibold text-zinc-950">
-                {order[item.key]}
-              </span>
+              <QuantityPair label={item.label} value={order[item.key]} />
             </div>
           ))}
         </div>
@@ -1129,6 +1214,10 @@ export function Workbench({
           .length,
         open: orders.filter((order) => order.status !== "WRITTEN_OFF").length,
         partial: orders.filter((order) => order.status === "PARTIAL").length,
+        firstDeliveryOpen: orders.filter(
+          (order) =>
+            order.status !== "WRITTEN_OFF" && order.firstDelivery.trim(),
+        ).length,
         urgentOpen: orders.filter(
           (order) =>
             order.status !== "WRITTEN_OFF" && order.urgency !== "NORMAL",
@@ -1152,6 +1241,17 @@ export function Workbench({
         .filter(
           (order) =>
             order.status !== "WRITTEN_OFF" && order.urgency !== "NORMAL",
+        )
+        .sort(sortByUrgency)
+        .slice(0, 10),
+    [orders],
+  );
+  const firstDeliveryOrders = useMemo(
+    () =>
+      orders
+        .filter(
+          (order) =>
+            order.status !== "WRITTEN_OFF" && order.firstDelivery.trim(),
         )
         .sort(sortByUrgency)
         .slice(0, 10),
@@ -1254,6 +1354,28 @@ export function Workbench({
     };
   }, [filteredOrders]);
 
+  const pendingQuantitySummary = useMemo(() => {
+    const pendingOrders = orders.filter((order) => order.status !== "WRITTEN_OFF");
+    const categories = PRODUCT_COLUMNS.map((item) => ({
+      ...item,
+      total: pendingOrders.reduce((sum, order) => sum + order[item.key], 0),
+    }));
+    const categoryTotal = pendingOrders.reduce(
+      (sum, order) => sum + orderCategoryQuantity(order),
+      0,
+    );
+    const quantity = pendingOrders.reduce(
+      (sum, order) => sum + orderQuantity(order),
+      0,
+    );
+
+    return {
+      categories,
+      quantity,
+      uncategorized: Math.max(quantity - categoryTotal, 0),
+    };
+  }, [orders]);
+
   async function submit(
     event: FormEvent<HTMLFormElement>,
     action: ServerAction,
@@ -1302,6 +1424,7 @@ export function Workbench({
       "返厂大衣",
       "返厂备注",
       "急单等级",
+      "先交要求",
       "部分交付数量",
       "部分交付日期",
       "部分交付备注",
@@ -1329,6 +1452,7 @@ export function Workbench({
       String(order.returnCoatQuantity),
       order.returnNote,
       urgencyLabels[order.urgency],
+      order.firstDelivery,
       order.partialQuantity ? String(order.partialQuantity) : "",
       order.partialDate ?? "",
       order.partialNote,
@@ -1408,7 +1532,7 @@ export function Workbench({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               className="h-12 w-full rounded-md border border-zinc-300 bg-white pl-10 pr-3 text-lg font-medium text-zinc-950 outline-none transition focus:border-zinc-950 focus:ring-2 focus:ring-zinc-200"
-              placeholder="输入订单号、公司或工厂查找"
+              placeholder="输入订单号、公司、工厂或先交要求查找"
               autoFocus
             />
           </label>
@@ -1432,7 +1556,7 @@ export function Workbench({
           ) : null}
         </section>
 
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
           <Stat icon={Clock3} label="今日登记" value={stats.todayRegistered} />
           <Stat icon={ListChecks} label="本月订单" value={stats.monthRegistered} />
           <Stat icon={History} label="本年订单" value={stats.yearRegistered} />
@@ -1443,7 +1567,47 @@ export function Workbench({
             value={stats.todayWrittenOff}
           />
           <Stat icon={ListChecks} label="待核销" value={stats.open} />
+          <Stat icon={Clock3} label="先交" value={stats.firstDeliveryOpen} />
           <Stat icon={Flame} label="急单" value={stats.urgentOpen} />
+        </section>
+
+        <section className="rounded-md border border-zinc-200 bg-white">
+          <div className="flex min-h-12 flex-wrap items-center justify-between gap-2 border-b border-zinc-200 px-4 py-3">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <ListChecks className="h-4 w-4 text-blue-700" aria-hidden="true" />
+              待核销明细
+            </div>
+            <div className="text-xs font-medium text-zinc-500">
+              订单 {stats.open} · 数量 {pendingQuantitySummary.quantity}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-px bg-zinc-200 text-sm sm:grid-cols-3 lg:grid-cols-6">
+            {pendingQuantitySummary.categories.map((item) => (
+              <div
+                key={item.key}
+                className="flex min-h-16 items-center justify-start bg-white px-4 py-3"
+              >
+                <QuantityPair label={item.label} value={item.total} large />
+              </div>
+            ))}
+            {pendingQuantitySummary.uncategorized > 0 ? (
+              <div className="flex min-h-16 items-center justify-start bg-white px-4 py-3">
+                <QuantityPair
+                  label="未分细类"
+                  value={pendingQuantitySummary.uncategorized}
+                  large
+                />
+              </div>
+            ) : null}
+            <div className="flex min-h-16 items-center justify-start bg-blue-50 px-4 py-3">
+              <QuantityPair
+                label="数量小计"
+                value={pendingQuantitySummary.quantity}
+                large
+                emphasis
+              />
+            </div>
+          </div>
         </section>
 
         {notice ? (
@@ -1548,9 +1712,18 @@ export function Workbench({
                       placeholder="可不填"
                     />
                   </Field>
-                  <Field label="急单等级">
-                    <UrgencySelect key={entryFormKey} name="urgency" />
-                  </Field>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="急单等级">
+                      <UrgencySelect key={entryFormKey} name="urgency" />
+                    </Field>
+                    <Field label="先交要求">
+                      <OptionSelect
+                        name="firstDelivery"
+                        options={[...FIRST_DELIVERY_OPTIONS]}
+                        placeholder="无先交"
+                      />
+                    </Field>
+                  </div>
                   <div className="text-xs font-medium text-zinc-500">
                     登记日期 {today} 自动记录
                   </div>
@@ -1579,6 +1752,27 @@ export function Workbench({
             {!isPhoneMode && !cloudMode ? (
               <UpdateCard busy={busy} onSubmit={submit} />
             ) : null}
+
+            <section className="rounded-md border border-zinc-200 bg-white">
+              <div className="flex h-12 items-center gap-2 border-b border-zinc-200 px-4 text-sm font-semibold">
+                <Clock3 className="h-4 w-4 text-orange-700" />
+                先交
+              </div>
+              <div>
+                {firstDeliveryOrders.length > 0 ? (
+                  firstDeliveryOrders.map((order) => (
+                    <OrderRow
+                      key={order.id}
+                      order={order}
+                      active={order.id === selected?.id}
+                      onSelect={() => setSelectedId(order.id)}
+                    />
+                  ))
+                ) : (
+                  <div className="px-4 py-6 text-sm text-zinc-500">暂无</div>
+                )}
+              </div>
+            </section>
 
             <section className="rounded-md border border-zinc-200 bg-white">
               <div className="flex h-12 items-center gap-2 border-b border-zinc-200 px-4 text-sm font-semibold">
@@ -1637,6 +1831,9 @@ export function Workbench({
                     <Badge className={urgencyTone[selected.urgency]}>
                       {urgencyLabels[selected.urgency]}
                     </Badge>
+                    {selected.firstDelivery ? (
+                      <Badge className={firstDeliveryTone}>先交</Badge>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -1662,6 +1859,11 @@ export function Workbench({
                         <span>返厂 {selected.returnedAt}</span>
                       ) : null}
                       <span>数量 {orderQuantity(selected)}</span>
+                      {selected.firstDelivery ? (
+                        <span className="font-medium text-orange-800">
+                          {selected.firstDelivery}
+                        </span>
+                      ) : null}
                       <span>更新 {formatDateTime(selected.updatedAt)}</span>
                     </div>
                   </div>
@@ -1711,6 +1913,14 @@ export function Workbench({
                         <UrgencySelect
                           name="urgency"
                           value={selected.urgency}
+                        />
+                      </Field>
+                      <Field label="先交要求">
+                        <OptionSelect
+                          name="firstDelivery"
+                          options={[...FIRST_DELIVERY_OPTIONS]}
+                          placeholder="无先交"
+                          value={selected.firstDelivery}
                         />
                       </Field>
                     </div>
@@ -1925,24 +2135,19 @@ export function Workbench({
                   </select>
                 </div>
               </div>
-              <div className="hidden gap-2 border-b border-zinc-200 px-4 py-3 text-sm md:grid md:grid-cols-3 xl:grid-cols-6">
+              <div className="hidden flex-wrap items-center gap-x-6 gap-y-2 border-b border-zinc-200 px-4 py-3 text-sm md:flex">
                 {accountSummary.categories.map((item) => (
-                  <div
+                  <QuantityPair
                     key={item.key}
-                    className="flex items-center justify-between gap-3"
-                  >
-                    <span className="text-zinc-500">{item.label}</span>
-                    <span className="font-semibold text-zinc-950">
-                      {item.total}
-                    </span>
-                  </div>
+                    label={item.label}
+                    value={item.total}
+                  />
                 ))}
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-zinc-500">数量小计</span>
-                  <span className="font-semibold text-zinc-950">
-                    {accountSummary.quantity}
-                  </span>
-                </div>
+                <QuantityPair
+                  label="数量小计"
+                  value={accountSummary.quantity}
+                  emphasis
+                />
               </div>
               <div className="max-h-[640px] overflow-auto">
                 {filteredOrders.length > 0 ? (
