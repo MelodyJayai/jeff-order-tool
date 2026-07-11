@@ -248,7 +248,7 @@ Output:
 release-installers/JeffOrderToolSetup-vVERSION.exe
 ```
 
-For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.21.exe`. It includes a prominent post-registration delivery action, repeatable categorized deliveries, remaining quantities, compact order details, legacy `.db` import, and the hardened Windows updater.
+For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.22.exe`. It adds explicit “save registration changes” and “backfill first delivery” actions, and fixes the Windows updater terminating itself while stopping the old server. Upgrading from `0.1.21` or earlier requires one final manual installer run because those versions contain the broken updater; subsequent in-app updates can complete normally.
 
 The installer defaults to the current Windows user's local app directory:
 

@@ -669,12 +669,99 @@ function DeliverySection({
       <div className="flex min-h-11 items-center justify-between gap-3 border-b border-orange-200 bg-orange-50 px-3 py-2">
         <div className="flex items-center gap-2 text-sm font-semibold text-orange-950">
           <Clock3 className="h-4 w-4" aria-hidden="true" />
-          先交数量与记录
+          先交登记
         </div>
         <div className="text-xs font-medium text-orange-800">
           {order.deliveries.length} 次
         </div>
       </div>
+
+      {canAdd ? (
+        <details
+          key={`${order.id}-${order.deliveries.length}`}
+          className="group border-b border-orange-200 bg-white"
+        >
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 bg-orange-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-orange-800 [&::-webkit-details-marker]:hidden">
+            <span className="inline-flex items-center gap-2">
+              <Plus
+                className="h-4 w-4 transition group-open:rotate-45"
+                aria-hidden="true"
+              />
+              更改登记：补填先交
+            </span>
+            <span className="text-xs font-medium text-orange-100">
+              填写数量
+            </span>
+          </summary>
+          <form
+            onSubmit={(event) =>
+              onSubmit(
+                event,
+                addOrderDeliveryAction,
+                `先交-${order.id}`,
+                true,
+              )
+            }
+            className="grid gap-2 border-t border-orange-100 p-3"
+          >
+            <input type="hidden" name="orderId" value={order.id} />
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              {PRODUCT_COLUMNS.map((item) => (
+                <Field
+                  key={item.key}
+                  label={`${item.label}（余${remaining[item.key]}）`}
+                >
+                  <input
+                    name={deliveryQuantityKeys[item.key]}
+                    type="number"
+                    min={0}
+                    max={remaining[item.key]}
+                    inputMode="numeric"
+                    defaultValue={0}
+                    className={fieldClass()}
+                  />
+                </Field>
+              ))}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[150px_minmax(0,1fr)_150px] sm:items-end">
+              <Field label="先交日期">
+                <input
+                  name="deliveryDate"
+                  type="date"
+                  defaultValue={today}
+                  required
+                  className={fieldClass()}
+                />
+              </Field>
+              <Field label="本次先交备注">
+                <input
+                  name="deliveryNote"
+                  className={fieldClass()}
+                  placeholder="可不填"
+                />
+              </Field>
+              <button
+                type="submit"
+                disabled={
+                  Boolean(busy) ||
+                  remainingTotal(order) <= 1 ||
+                  calculateTotalQuantity(remaining) <= 0
+                }
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-orange-700 px-3 text-sm font-medium text-white transition hover:bg-orange-800 disabled:cursor-not-allowed disabled:bg-orange-300"
+                title="保存补登记的先交数量"
+              >
+                <Save className="h-4 w-4" aria-hidden="true" />
+                {busy === `先交-${order.id}` ? "保存中" : "保存先交"}
+              </button>
+            </div>
+            {remainingTotal(order) <= 1 ? (
+              <div className="text-xs font-medium text-zinc-500">
+                最后一件请直接使用“出货核销”。
+              </div>
+            ) : null}
+          </form>
+        </details>
+      ) : null}
 
       <DeliveryQuantityRow
         label="累计先交"
@@ -750,89 +837,6 @@ function DeliverySection({
         </div>
       ) : null}
 
-      {canAdd ? (
-        <details className="group border-t border-orange-200 bg-white">
-          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 bg-orange-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-orange-800 [&::-webkit-details-marker]:hidden">
-            <span className="inline-flex items-center gap-2">
-              <Plus
-                className="h-4 w-4 transition group-open:rotate-45"
-                aria-hidden="true"
-              />
-              新增先交数量
-            </span>
-            <span className="text-xs font-medium text-orange-100">
-              点开填写
-            </span>
-          </summary>
-          <form
-            onSubmit={(event) =>
-              onSubmit(
-                event,
-                addOrderDeliveryAction,
-                `先交-${order.id}`,
-                true,
-              )
-            }
-            className="grid gap-2 border-t border-orange-100 p-3"
-          >
-            <input type="hidden" name="orderId" value={order.id} />
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-              {PRODUCT_COLUMNS.map((item) => (
-                <Field
-                  key={item.key}
-                  label={`${item.label}（余${remaining[item.key]}）`}
-                >
-                  <input
-                    name={deliveryQuantityKeys[item.key]}
-                    type="number"
-                    min={0}
-                    max={remaining[item.key]}
-                    inputMode="numeric"
-                    defaultValue={0}
-                    className={fieldClass()}
-                  />
-                </Field>
-              ))}
-            </div>
-            <div className="grid gap-2 sm:grid-cols-[150px_minmax(0,1fr)_150px] sm:items-end">
-              <Field label="先交日期">
-                <input
-                  name="deliveryDate"
-                  type="date"
-                  defaultValue={today}
-                  required
-                  className={fieldClass()}
-                />
-              </Field>
-              <Field label="本次先交备注">
-                <input
-                  name="deliveryNote"
-                  className={fieldClass()}
-                  placeholder="可不填"
-                />
-              </Field>
-              <button
-                type="submit"
-                disabled={
-                  Boolean(busy) ||
-                  remainingTotal(order) <= 1 ||
-                  calculateTotalQuantity(remaining) <= 0
-                }
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-orange-700 px-3 text-sm font-medium text-white transition hover:bg-orange-800 disabled:cursor-not-allowed disabled:bg-orange-300"
-                title="保存本次先交"
-              >
-                <Save className="h-4 w-4" aria-hidden="true" />
-                {busy === `先交-${order.id}` ? "保存中" : "保存先交"}
-              </button>
-            </div>
-            {remainingTotal(order) <= 1 ? (
-              <div className="text-xs font-medium text-zinc-500">
-                最后一件请直接使用“出货核销”。
-              </div>
-            ) : null}
-          </form>
-        </details>
-      ) : null}
     </section>
   );
 }
@@ -2357,10 +2361,10 @@ export function Workbench({
                         type="submit"
                         disabled={Boolean(busy)}
                         className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-blue-600 bg-blue-600 px-4 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-blue-300 disabled:bg-blue-300"
-                        title="保存详情"
+                        title="保存登记更改"
                       >
                         <Save className="h-4 w-4" aria-hidden="true" />
-                        {busy === "保存" ? "保存中" : "保存"}
+                        {busy === "保存" ? "保存中" : "保存登记更改"}
                       </button>
                     </div>
                   </form>

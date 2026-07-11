@@ -71,9 +71,11 @@ internal static class JeffOrderToolUpdater
             if (int.TryParse(rawPid, out pid))
             {
                 Log(logPath, "stopping pid=" + pid);
+                // The updater was launched by the server. Killing the whole
+                // process tree would terminate this updater before install.
                 RunProcess(
                     "taskkill.exe",
-                    "/PID " + pid + " /T /F",
+                    "/PID " + pid + " /F",
                     Path.GetDirectoryName(appDir),
                     logPath,
                     8000);
@@ -98,7 +100,7 @@ internal static class JeffOrderToolUpdater
             "  $_.CommandLine -and\r\n" +
             "  ($_.CommandLine -like ('*' + $dir + '*') -or\r\n" +
             "   $_.CommandLine -like ('*' + $escaped + '*'))\r\n" +
-            "} | ForEach-Object { taskkill.exe /PID $_.ProcessId /T /F | Out-Null }\r\n";
+            "} | ForEach-Object { taskkill.exe /PID $_.ProcessId /F | Out-Null }\r\n";
         string scriptPath = Path.Combine(appDir, "logs", "stop-update-processes.ps1");
 
         try
