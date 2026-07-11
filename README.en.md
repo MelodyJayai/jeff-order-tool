@@ -61,6 +61,7 @@ If `JEFF_ADMIN_PASSWORD` is set, the app uses it and skips the first-setup page.
 - Paired quantity labels, such as "Suit set 128" and "Shirt 98", so totals are easier to read.
 - Urgency levels.
 - Cumulative delivered and remaining quantities, with per-delivery history and undo.
+- Compact desktop order details with an inline editable quantity row and a collapsed add-delivery form.
 - Order-number ascending sort by default, with registration-date sort options.
 - CSV export.
 - CSV import with order-number based update/insert.
@@ -247,7 +248,7 @@ Output:
 release-installers/JeffOrderToolSetup-vVERSION.exe
 ```
 
-For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.18.exe`. It keeps the first-delivery request and legacy `.db` import features validated in `0.1.16`, includes the `0.1.17` quantity-summary readability improvement, and makes the in-app updater more reliable when stopping the old service and restarting the tool.
+For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.20.exe`. It includes repeatable categorized deliveries, remaining quantities, compact order details, legacy `.db` import, and the hardened Windows updater.
 
 The installer defaults to the current Windows user's local app directory:
 
@@ -286,7 +287,7 @@ The in-app update card checks GitHub Releases by default:
 https://github.com/MelodyJayai/jeff-order-tool/releases
 ```
 
-When publishing a new version, upload `release-installers/JeffOrderToolSetup-vVERSION.exe` to the matching GitHub Release. Installed users can click the update button in the app; the app creates a database backup, downloads the installer, runs it silently in the existing install directory, and reopens the tool.
+When publishing a new version, upload `release-installers/JeffOrderToolSetup-vVERSION.exe` to the matching GitHub Release. Installed users can click the update button in the app; the app creates a database backup, downloads the installer, runs it silently in the existing install directory, and reopens the tool. The update card now shows the action result locally and includes a direct installer-download fallback.
 
 You can also use a static update manifest instead of GitHub Releases:
 

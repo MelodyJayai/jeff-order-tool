@@ -73,6 +73,13 @@ type PhoneAccess = {
 };
 
 type ServerAction = (formData: FormData) => Promise<ActionResult>;
+type SubmitHandler = (
+  event: FormEvent<HTMLFormElement>,
+  action: ServerAction,
+  busyLabel: string,
+  reset?: boolean,
+  onResult?: (result: ActionResult) => void,
+) => Promise<void>;
 type StatusFilter = "ALL" | "OPEN" | OrderStatus;
 type UrgencyFilter = "ALL" | UrgencyLevel;
 type CompanyFilter = "ALL" | "UNASSIGNED" | string;
@@ -613,12 +620,14 @@ function DeliveryQuantityRow({
   }[tone];
 
   return (
-    <div className={cn("border-b px-3 py-3 last:border-b-0", toneClass)}>
-      <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-        <span className="font-semibold">{label}</span>
-        <span className="font-semibold">小计 {total}</span>
-      </div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-5">
+    <div
+      className={cn(
+        "flex min-h-11 flex-wrap items-center gap-x-4 gap-y-1 border-b px-3 py-2 last:border-b-0",
+        toneClass,
+      )}
+    >
+      <span className="min-w-16 text-sm font-semibold">{label}</span>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         {PRODUCT_COLUMNS.map((item) => (
           <QuantityPair
             key={item.key}
@@ -627,6 +636,9 @@ function DeliveryQuantityRow({
           />
         ))}
       </div>
+      <span className="ml-auto whitespace-nowrap text-sm font-semibold">
+        小计 {total}
+      </span>
     </div>
   );
 }
@@ -640,12 +652,7 @@ function DeliverySection({
 }: {
   busy: string | null;
   editable: boolean;
-  onSubmit: (
-    event: FormEvent<HTMLFormElement>,
-    action: ServerAction,
-    busyLabel: string,
-    reset?: boolean,
-  ) => Promise<void>;
+  onSubmit: SubmitHandler;
   order: OrderRecord;
   today: string;
 }) {
@@ -748,76 +755,85 @@ function DeliverySection({
       )}
 
       {canAdd ? (
-        <form
-          onSubmit={(event) =>
-            onSubmit(
-              event,
-              addOrderDeliveryAction,
-              `先交-${order.id}`,
-              true,
-            )
-          }
-          className="grid gap-3 border-t border-orange-200 bg-white p-3"
-        >
-          <input type="hidden" name="orderId" value={order.id} />
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-sm font-semibold text-zinc-950">
-              记录本次先交
-            </div>
-            <Field label="先交日期">
-              <input
-                name="deliveryDate"
-                type="date"
-                defaultValue={today}
-                required
-                className={fieldClass()}
+        <details className="group border-t border-orange-200 bg-white">
+          <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm font-semibold text-orange-900 transition hover:bg-orange-50 [&::-webkit-details-marker]:hidden">
+            <span className="inline-flex items-center gap-2">
+              <Plus
+                className="h-4 w-4 transition group-open:rotate-45"
+                aria-hidden="true"
               />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-            {PRODUCT_COLUMNS.map((item) => (
-              <Field
-                key={item.key}
-                label={`${item.label}（余${remaining[item.key]}）`}
-              >
+              记录本次先交
+            </span>
+            <span className="text-xs font-medium text-orange-700">填写</span>
+          </summary>
+          <form
+            onSubmit={(event) =>
+              onSubmit(
+                event,
+                addOrderDeliveryAction,
+                `先交-${order.id}`,
+                true,
+              )
+            }
+            className="grid gap-2 border-t border-orange-100 p-3"
+          >
+            <input type="hidden" name="orderId" value={order.id} />
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              {PRODUCT_COLUMNS.map((item) => (
+                <Field
+                  key={item.key}
+                  label={`${item.label}（余${remaining[item.key]}）`}
+                >
+                  <input
+                    name={deliveryQuantityKeys[item.key]}
+                    type="number"
+                    min={0}
+                    max={remaining[item.key]}
+                    inputMode="numeric"
+                    defaultValue={0}
+                    className={fieldClass()}
+                  />
+                </Field>
+              ))}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[150px_minmax(0,1fr)_150px] sm:items-end">
+              <Field label="先交日期">
                 <input
-                  name={deliveryQuantityKeys[item.key]}
-                  type="number"
-                  min={0}
-                  max={remaining[item.key]}
-                  inputMode="numeric"
-                  defaultValue={0}
+                  name="deliveryDate"
+                  type="date"
+                  defaultValue={today}
+                  required
                   className={fieldClass()}
                 />
               </Field>
-            ))}
-          </div>
-          <Field label="本次先交备注">
-            <input
-              name="deliveryNote"
-              className={fieldClass()}
-              placeholder="可不填"
-            />
-          </Field>
-          <button
-            type="submit"
-            disabled={
-              Boolean(busy) ||
-              remainingTotal(order) <= 1 ||
-              calculateTotalQuantity(remaining) <= 0
-            }
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-orange-700 px-4 text-sm font-medium text-white transition hover:bg-orange-800 disabled:cursor-not-allowed disabled:bg-orange-300"
-            title="保存本次先交"
-          >
-            <Save className="h-4 w-4" aria-hidden="true" />
-            {busy === `先交-${order.id}` ? "保存中" : "保存本次先交"}
-          </button>
-          {remainingTotal(order) <= 1 ? (
-            <div className="text-xs font-medium text-zinc-500">
-              最后一件请直接使用“出货核销”。
+              <Field label="本次先交备注">
+                <input
+                  name="deliveryNote"
+                  className={fieldClass()}
+                  placeholder="可不填"
+                />
+              </Field>
+              <button
+                type="submit"
+                disabled={
+                  Boolean(busy) ||
+                  remainingTotal(order) <= 1 ||
+                  calculateTotalQuantity(remaining) <= 0
+                }
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-orange-700 px-3 text-sm font-medium text-white transition hover:bg-orange-800 disabled:cursor-not-allowed disabled:bg-orange-300"
+                title="保存本次先交"
+              >
+                <Save className="h-4 w-4" aria-hidden="true" />
+                {busy === `先交-${order.id}` ? "保存中" : "保存先交"}
+              </button>
             </div>
-          ) : null}
-        </form>
+            {remainingTotal(order) <= 1 ? (
+              <div className="text-xs font-medium text-zinc-500">
+                最后一件请直接使用“出货核销”。
+              </div>
+            ) : null}
+          </form>
+        </details>
       ) : null}
     </section>
   );
@@ -830,12 +846,7 @@ function ReturnOrderForm({
   today,
 }: {
   busy: string | null;
-  onSubmit: (
-    event: FormEvent<HTMLFormElement>,
-    action: ServerAction,
-    busyLabel: string,
-    reset?: boolean,
-  ) => Promise<void>;
+  onSubmit: SubmitHandler;
   order: OrderRecord;
   today: string;
 }) {
@@ -1015,12 +1026,7 @@ function ImportBackupCard({
   onSubmit,
 }: {
   busy: string | null;
-  onSubmit: (
-    event: FormEvent<HTMLFormElement>,
-    action: ServerAction,
-    busyLabel: string,
-    reset?: boolean,
-  ) => Promise<void>;
+  onSubmit: SubmitHandler;
 }) {
   return (
     <section className="hidden rounded-md border border-zinc-200 bg-white md:block">
@@ -1097,15 +1103,11 @@ function UpdateCard({
   onSubmit,
 }: {
   busy: string | null;
-  onSubmit: (
-    event: FormEvent<HTMLFormElement>,
-    action: ServerAction,
-    busyLabel: string,
-    reset?: boolean,
-  ) => Promise<void>;
+  onSubmit: SubmitHandler;
 }) {
   const [update, setUpdate] = useState<UpdateState | null>(null);
   const [checking, setChecking] = useState(true);
+  const [installResult, setInstallResult] = useState<ActionResult | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1179,17 +1181,36 @@ function UpdateCard({
             {checking ? "正在检查更新" : update?.message || "暂无更新信息"}
           </div>
         </div>
-        {update?.releaseUrl ? (
-          <a
-            href={update.releaseUrl}
-            target="_blank"
-            className="text-xs font-medium text-zinc-700 underline-offset-2 hover:underline"
-          >
-            查看发布页面
-          </a>
-        ) : null}
+        <div className="flex flex-wrap gap-x-4 gap-y-2">
+          {update?.releaseUrl ? (
+            <a
+              href={update.releaseUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-medium text-zinc-700 underline-offset-2 hover:underline"
+            >
+              查看发布页面
+            </a>
+          ) : null}
+          {canInstall && update?.downloadUrl ? (
+            <a
+              href={update.downloadUrl}
+              className="text-xs font-medium text-blue-700 underline-offset-2 hover:underline"
+            >
+              手动下载安装包
+            </a>
+          ) : null}
+        </div>
         <form
-          onSubmit={(event) => onSubmit(event, installUpdateAction, "更新")}
+          onSubmit={(event) =>
+            onSubmit(
+              event,
+              installUpdateAction,
+              "更新",
+              false,
+              setInstallResult,
+            )
+          }
         >
           <button
             type="submit"
@@ -1205,6 +1226,18 @@ function UpdateCard({
                 : "无需更新"}
           </button>
         </form>
+        {installResult ? (
+          <div
+            className={cn(
+              "rounded-md border px-3 py-2 text-xs font-medium",
+              installResult.ok
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-red-200 bg-red-50 text-red-800",
+            )}
+          >
+            {installResult.message}
+          </div>
+        ) : null}
       </div>
     </section>
   );
@@ -1343,12 +1376,7 @@ function MobileDetail({
   order: OrderRecord;
   today: string;
   busy: string | null;
-  onSubmit: (
-    event: FormEvent<HTMLFormElement>,
-    action: ServerAction,
-    busyLabel: string,
-    reset?: boolean,
-  ) => Promise<void>;
+  onSubmit: SubmitHandler;
 }) {
   const summary = productSummary(order);
   const returnedSummary = returnSummary(order);
@@ -1723,6 +1751,7 @@ export function Workbench({
     action: ServerAction,
     busyLabel: string,
     reset = false,
+    onResult?: (result: ActionResult) => void,
   ) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -1731,6 +1760,7 @@ export function Workbench({
     try {
       const actionResult = await action(new FormData(form));
       setNotice(actionResult);
+      onResult?.(actionResult);
 
       if (actionResult.ok && reset) {
         form.reset();
@@ -2204,9 +2234,9 @@ export function Workbench({
             <EventLogCard events={initialEvents} />
           </div>
 
-          <div className="order-first grid content-start gap-4 lg:order-none">
+          <div className="order-first grid content-start gap-3 lg:order-none">
             <section className="rounded-md border border-zinc-200 bg-white">
-              <div className="flex min-h-12 flex-wrap items-center justify-between gap-2 border-b border-zinc-200 px-4 py-3">
+              <div className="flex min-h-11 flex-wrap items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2">
                 <div className="text-sm font-semibold">订单详情</div>
                 {selected ? (
                   <div className="flex flex-wrap gap-1">
@@ -2232,12 +2262,12 @@ export function Workbench({
                     onSubmit={submit}
                   />
                 ) : (
-                <div className="hidden gap-4 p-4 md:grid">
-                  <div className="grid gap-1">
-                    <div className="break-all text-2xl font-semibold text-zinc-950">
+                <div className="hidden gap-3 p-3 md:grid">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <div className="break-all text-xl font-semibold text-zinc-950">
                       {selected.code}
                     </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-zinc-500">
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-500">
                       <span>登记 {selected.registeredAt}</span>
                       <span>出货 {dateText(selected.writtenOffAt)}</span>
                       {selected.returnedAt ? (
@@ -2258,11 +2288,11 @@ export function Workbench({
                     onSubmit={(event) =>
                       submit(event, updateOrderAction, "保存")
                     }
-                    className="grid gap-3"
+                    className="grid gap-2"
                   >
                     <input type="hidden" name="id" value={selected.id} />
                     <input type="hidden" name="quantity" value={selected.quantity} />
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1.25fr)_140px_120px]">
                       <Field label="公司">
                         <OptionSelect
                           name="companyName"
@@ -2294,42 +2324,47 @@ export function Workbench({
                         />
                       </Field>
                     </div>
-                    <div className="rounded-md border border-zinc-200">
-                      <div className="border-b border-zinc-200 px-3 py-2 text-xs font-medium text-zinc-600">
+                    <div className="flex min-h-11 flex-wrap items-center gap-x-4 gap-y-1 border-y border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                      <span className="text-xs font-semibold text-zinc-600">
                         细分类数量
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-3">
-                        {PRODUCT_COLUMNS.map((item) => (
-                          <Field key={item.key} label={item.label}>
-                            <input
-                              name={item.key}
-                              type="number"
-                              min={0}
-                              inputMode="numeric"
-                              defaultValue={selected[item.key]}
-                              className={fieldClass()}
-                            />
-                          </Field>
-                        ))}
-                      </div>
+                      </span>
+                      {PRODUCT_COLUMNS.map((item) => (
+                        <label
+                          key={item.key}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-zinc-600"
+                        >
+                          {item.label}
+                          <input
+                            name={item.key}
+                            type="number"
+                            min={0}
+                            inputMode="numeric"
+                            defaultValue={selected[item.key]}
+                            className="h-8 w-12 border-0 border-b border-zinc-300 bg-transparent px-1 text-center text-sm font-semibold text-zinc-950 outline-none transition focus:border-blue-600 focus:ring-0"
+                            aria-label={`${item.label}数量`}
+                          />
+                        </label>
+                      ))}
                     </div>
-                    <Field label="备注">
-                      <textarea
-                        name="note"
-                        rows={3}
-                        defaultValue={selected.note}
-                        className={textareaClass()}
-                      />
-                    </Field>
-                    <button
-                      type="submit"
-                      disabled={Boolean(busy)}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-blue-600 bg-blue-600 px-4 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-blue-300 disabled:bg-blue-300"
-                      title="保存详情"
-                    >
-                      <Save className="h-4 w-4" aria-hidden="true" />
-                      {busy === "保存" ? "保存中" : "保存"}
-                    </button>
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px] sm:items-end">
+                      <Field label="备注">
+                        <textarea
+                          name="note"
+                          rows={2}
+                          defaultValue={selected.note}
+                          className={textareaClass()}
+                        />
+                      </Field>
+                      <button
+                        type="submit"
+                        disabled={Boolean(busy)}
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-blue-600 bg-blue-600 px-4 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-blue-300 disabled:bg-blue-300"
+                        title="保存详情"
+                      >
+                        <Save className="h-4 w-4" aria-hidden="true" />
+                        {busy === "保存" ? "保存中" : "保存"}
+                      </button>
+                    </div>
                   </form>
 
                   <DeliverySection
