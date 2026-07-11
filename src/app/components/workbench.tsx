@@ -669,7 +669,7 @@ function DeliverySection({
       <div className="flex min-h-11 items-center justify-between gap-3 border-b border-orange-200 bg-orange-50 px-3 py-2">
         <div className="flex items-center gap-2 text-sm font-semibold text-orange-950">
           <Clock3 className="h-4 w-4" aria-hidden="true" />
-          先交记录
+          先交数量与记录
         </div>
         <div className="text-xs font-medium text-orange-800">
           {order.deliveries.length} 次
@@ -748,23 +748,21 @@ function DeliverySection({
             </div>
           ))}
         </div>
-      ) : (
-        <div className="bg-white px-3 py-3 text-sm text-zinc-500">
-          暂无按数量登记的先交记录
-        </div>
-      )}
+      ) : null}
 
       {canAdd ? (
         <details className="group border-t border-orange-200 bg-white">
-          <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm font-semibold text-orange-900 transition hover:bg-orange-50 [&::-webkit-details-marker]:hidden">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 bg-orange-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-orange-800 [&::-webkit-details-marker]:hidden">
             <span className="inline-flex items-center gap-2">
               <Plus
                 className="h-4 w-4 transition group-open:rotate-45"
                 aria-hidden="true"
               />
-              记录本次先交
+              新增先交数量
             </span>
-            <span className="text-xs font-medium text-orange-700">填写</span>
+            <span className="text-xs font-medium text-orange-100">
+              点开填写
+            </span>
           </summary>
           <form
             onSubmit={(event) =>

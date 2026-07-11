@@ -61,7 +61,7 @@ If `JEFF_ADMIN_PASSWORD` is set, the app uses it and skips the first-setup page.
 - Paired quantity labels, such as "Suit set 128" and "Shirt 98", so totals are easier to read.
 - Urgency levels.
 - Cumulative delivered and remaining quantities, with per-delivery history and undo.
-- Compact desktop order details with an inline editable quantity row and a collapsed add-delivery form.
+- Compact desktop order details with an inline editable quantity row and a prominent add-delivery action.
 - Order-number ascending sort by default, with registration-date sort options.
 - CSV export.
 - CSV import with order-number based update/insert.
@@ -248,7 +248,7 @@ Output:
 release-installers/JeffOrderToolSetup-vVERSION.exe
 ```
 
-For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.20.exe`. It includes repeatable categorized deliveries, remaining quantities, compact order details, legacy `.db` import, and the hardened Windows updater.
+For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.21.exe`. It includes a prominent post-registration delivery action, repeatable categorized deliveries, remaining quantities, compact order details, legacy `.db` import, and the hardened Windows updater.
 
 The installer defaults to the current Windows user's local app directory:
 
