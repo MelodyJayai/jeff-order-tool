@@ -33,6 +33,14 @@ function insertSql(table, row) {
     .join(", ")}) VALUES (${columns.map((key) => sqlValue(row[key])).join(", ")});`;
 }
 
+function tableExists(database, table) {
+  return Boolean(
+    database
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(table),
+  );
+}
+
 if (!fs.existsSync(dbPath)) {
   console.error(`SQLite database not found: ${dbPath}`);
   process.exit(1);
@@ -89,13 +97,39 @@ ON orders (lower(trim(coalesce(company_name, ''))), lower(trim(code)));`,
   created_at TEXT NOT NULL
 );`,
   "",
+  `CREATE TABLE IF NOT EXISTS order_deliveries (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  delivered_at TEXT NOT NULL,
+  suit_quantity INTEGER NOT NULL DEFAULT 0,
+  jacket_quantity INTEGER NOT NULL DEFAULT 0,
+  pant_quantity INTEGER NOT NULL DEFAULT 0,
+  vest_quantity INTEGER NOT NULL DEFAULT 0,
+  coat_quantity INTEGER NOT NULL DEFAULT 0,
+  uncategorized_quantity INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  source TEXT NOT NULL DEFAULT 'STRUCTURED',
+  created_at TEXT NOT NULL
+);`,
+  "",
   "TRUNCATE TABLE order_events;",
+  "TRUNCATE TABLE order_deliveries;",
   "TRUNCATE TABLE orders CASCADE;",
   "",
 ];
 
 for (const row of db.prepare("SELECT * FROM orders ORDER BY created_at").all()) {
   lines.push(insertSql("orders", row));
+}
+
+lines.push("");
+
+if (tableExists(db, "order_deliveries")) {
+  for (const row of db
+    .prepare("SELECT * FROM order_deliveries ORDER BY created_at")
+    .all()) {
+    lines.push(insertSql("order_deliveries", row));
+  }
 }
 
 lines.push("");

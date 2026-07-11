@@ -8,17 +8,19 @@ import path from "node:path";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { PRODUCT_COLUMNS } from "@/lib/catalog";
+import { calculateTotalQuantity, PRODUCT_COLUMNS } from "@/lib/catalog";
 import { ensureActionAuthenticated } from "@/lib/auth";
 import { chinaToday, cleanDate, optionalDate } from "@/lib/date";
 import { areInAppUpdatesDisabled } from "@/lib/deployment";
 import {
+  addOrderDelivery,
   createDatabaseBackupFile,
   createOrders,
   getDataDirectory,
   importOrders,
   importOrdersFromSqliteBackup,
   markOrderReturned,
+  removeOrderDelivery,
   undoWriteOffOrder,
   updateOrder,
   writeOffOrder,
@@ -36,6 +38,14 @@ import { checkForUpdates } from "@/lib/update";
 
 const urgencySchema = z.enum(URGENCY_LEVELS);
 
+const deliveryFormKeys = {
+  suitQuantity: "deliverySuitQuantity",
+  jacketQuantity: "deliveryJacketQuantity",
+  pantQuantity: "deliveryPantQuantity",
+  vestQuantity: "deliveryVestQuantity",
+  coatQuantity: "deliveryCoatQuantity",
+} as const;
+
 function text(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() : "";
@@ -44,11 +54,6 @@ function text(formData: FormData, key: string) {
 function positiveInt(formData: FormData, key: string, fallback = 1) {
   const value = Number.parseInt(text(formData, key), 10);
   return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-function nullablePositiveInt(formData: FormData, key: string) {
-  const value = Number.parseInt(text(formData, key), 10);
-  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function nonNegativeInt(formData: FormData, key: string) {
@@ -61,6 +66,22 @@ function productQuantities(formData: FormData) {
     (values, item) => ({
       ...values,
       [item.key]: nonNegativeInt(formData, item.key),
+    }),
+    {
+      suitQuantity: 0,
+      jacketQuantity: 0,
+      pantQuantity: 0,
+      vestQuantity: 0,
+      coatQuantity: 0,
+    },
+  );
+}
+
+function deliveryProductQuantities(formData: FormData) {
+  return PRODUCT_COLUMNS.reduce(
+    (values, item) => ({
+      ...values,
+      [item.key]: nonNegativeInt(formData, deliveryFormKeys[item.key]),
     }),
     {
       suitQuantity: 0,
@@ -212,7 +233,11 @@ function csvStatus(value: string, writtenOffAt: string): OrderStatus {
     return "WRITTEN_OFF";
   }
 
-  if (clean === "PARTIAL" || value === statusLabels.PARTIAL) {
+  if (
+    clean === "PARTIAL" ||
+    value === statusLabels.PARTIAL ||
+    value === "部分交付"
+  ) {
     return "PARTIAL";
   }
 
@@ -248,6 +273,27 @@ function csvImportRows(csvText: string): ImportOrderInput[] {
       rowValue(row, ["状态", "status"]),
       writtenOffAt ?? "",
     );
+    const registeredAt = cleanDate(
+      rowValue(row, ["登记日期", "registered at", "registration date"]),
+      chinaToday(),
+    );
+    const partialDate = optionalDate(
+      rowValue(row, ["部分交付日期", "partial date"]),
+    );
+    const partialNote = rowValue(row, ["部分交付备注", "partial note"]);
+    const initialDeliveryQuantities = {
+      suitQuantity: csvInt(rowValue(row, ["累计先交套装"])),
+      jacketQuantity: csvInt(rowValue(row, ["累计先交单衫"])),
+      pantQuantity: csvInt(rowValue(row, ["累计先交单裤"])),
+      vestQuantity: csvInt(rowValue(row, ["累计先交马甲"])),
+      coatQuantity: csvInt(rowValue(row, ["累计先交大衣"])),
+    };
+    const initialUncategorizedQuantity = csvInt(
+      rowValue(row, ["先交未分细类"]),
+    );
+    const initialDeliveryTotal =
+      calculateTotalQuantity(initialDeliveryQuantities) +
+      initialUncategorizedQuantity;
 
     return [
       {
@@ -268,10 +314,7 @@ function csvImportRows(csvText: string): ImportOrderInput[] {
         vestQuantity: csvInt(rowValue(row, ["马甲", "vest"])),
         coatQuantity: csvInt(rowValue(row, ["大衣", "coat"])),
         quantity: csvInt(rowValue(row, ["数量小计", "数量", "quantity"]), 1),
-        registeredAt: cleanDate(
-          rowValue(row, ["登记日期", "registered at", "registration date"]),
-          chinaToday(),
-        ),
+        registeredAt,
         status,
         writtenOffAt,
         returnedAt,
@@ -285,11 +328,21 @@ function csvImportRows(csvText: string): ImportOrderInput[] {
         partialQuantity: csvNullableInt(
           rowValue(row, ["部分交付数量", "partial quantity"]),
         ),
-        partialDate: optionalDate(
-          rowValue(row, ["部分交付日期", "partial date"]),
-        ),
-        partialNote: rowValue(row, ["部分交付备注", "partial note"]),
+        partialDate,
+        partialNote,
         note: rowValue(row, ["备注", "note"]),
+        initialDelivery:
+          initialDeliveryTotal > 0
+            ? {
+                deliveredAt: cleanDate(
+                  rowValue(row, ["最近先交日期"]),
+                  partialDate ?? registeredAt,
+                ),
+                uncategorizedQuantity: initialUncategorizedQuantity,
+                note: rowValue(row, ["先交明细"]),
+                ...initialDeliveryQuantities,
+              }
+            : null,
       },
     ];
   });
@@ -314,17 +367,48 @@ export async function createOrdersAction(
     return result(false, "请先选择公司；不同公司可以使用相同订单号");
   }
 
+  const quantities = productQuantities(formData);
+  const initialDeliveryQuantities = deliveryProductQuantities(formData);
+  const initialDeliveryTotal = calculateTotalQuantity(initialDeliveryQuantities);
+  const orderTotal = calculateTotalQuantity(quantities);
+  const exceededLabels = PRODUCT_COLUMNS.filter(
+    (item) => initialDeliveryQuantities[item.key] > quantities[item.key],
+  ).map((item) => item.label);
+
+  if (exceededLabels.length > 0) {
+    return result(
+      false,
+      `${exceededLabels.join("、")}的先交数量不能超过订单数量`,
+    );
+  }
+
+  if (initialDeliveryTotal > 0 && initialDeliveryTotal >= orderTotal) {
+    return result(false, "首批先交必须保留未交数量；全部交付请登记后再用出货核销");
+  }
+
   const { created, skipped } = createOrders({
     codes,
     companyName,
     factoryName: text(formData, "factoryName"),
-    firstDelivery: text(formData, "firstDelivery"),
-    customerName: text(formData, "customerName"),
+    firstDelivery: "",
+    customerName: "",
     quantity: positiveInt(formData, "quantity"),
-    ...productQuantities(formData),
+    ...quantities,
     registeredAt: cleanDate(text(formData, "registeredAt"), chinaToday()),
     urgency: urgency(formData),
     note: text(formData, "note"),
+    initialDelivery:
+      initialDeliveryTotal > 0
+          ? {
+            deliveredAt: cleanDate(
+              text(formData, "deliveryDate"),
+              chinaToday(),
+            ),
+            uncategorizedQuantity: 0,
+            note: text(formData, "deliveryNote"),
+            ...initialDeliveryQuantities,
+          }
+        : null,
   });
 
   revalidatePath("/");
@@ -362,15 +446,10 @@ export async function updateOrderAction(
     id,
     companyName: text(formData, "companyName"),
     factoryName: text(formData, "factoryName"),
-    firstDelivery: text(formData, "firstDelivery"),
-    customerName: text(formData, "customerName"),
     quantity: positiveInt(formData, "quantity"),
     ...productQuantities(formData),
     registeredAt: cleanDate(text(formData, "registeredAt"), chinaToday()),
     urgency: urgency(formData),
-    partialQuantity: nullablePositiveInt(formData, "partialQuantity"),
-    partialDate: optionalDate(text(formData, "partialDate")),
-    partialNote: text(formData, "partialNote"),
     note: text(formData, "note"),
   });
 
@@ -384,7 +463,98 @@ export async function updateOrderAction(
     return result(false, "这家公司下面已经有相同订单号");
   }
 
+  if (updated === "below_delivered") {
+    return result(false, "订单数量不能小于已经先交的细分类数量");
+  }
+
   return result(false, "记录不存在");
+}
+
+export async function addOrderDeliveryAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  if (!(await ensureActionAuthenticated())) {
+    return result(false, "请先登录后再操作");
+  }
+
+  const orderId = text(formData, "orderId");
+
+  if (!orderId) {
+    return result(false, "没有找到这条订单");
+  }
+
+  const added = addOrderDelivery({
+    orderId,
+    deliveredAt: cleanDate(text(formData, "deliveryDate"), chinaToday()),
+    note: text(formData, "deliveryNote"),
+    ...deliveryProductQuantities(formData),
+  });
+
+  revalidatePath("/");
+  revalidatePath("/events");
+
+  if (added === "added") {
+    return result(true, "本次先交已记录，剩余数量已更新");
+  }
+
+  if (added === "empty") {
+    return result(false, "请至少填写一种先交数量");
+  }
+
+  if (added === "closed") {
+    return result(false, "已核销或返厂中的订单不能再登记先交");
+  }
+
+  if (added === "missing_categories") {
+    return result(false, "这条旧订单没有细分类数量，请先补齐订单的细分类数量");
+  }
+
+  if (added === "would_complete") {
+    return result(false, "本次会交完全部剩余数量，请直接使用出货核销");
+  }
+
+  if (typeof added === "object" && added.status === "exceeds") {
+    return result(
+      false,
+      `${added.labels.join("、")}的先交数量超过剩余未交数量`,
+    );
+  }
+
+  return result(false, "记录不存在");
+}
+
+export async function removeOrderDeliveryAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  if (!(await ensureActionAuthenticated())) {
+    return result(false, "请先登录后再操作");
+  }
+
+  const orderId = text(formData, "orderId");
+  const deliveryId = text(formData, "deliveryId");
+
+  if (!orderId || !deliveryId) {
+    return result(false, "没有找到这次先交记录");
+  }
+
+  const removed = removeOrderDelivery(orderId, deliveryId);
+
+  revalidatePath("/");
+  revalidatePath("/events");
+
+  if (removed === "removed") {
+    return result(true, "这次先交已撤销，剩余数量已恢复");
+  }
+
+  if (removed === "protected") {
+    return result(false, "旧版迁移的部分交付记录不能直接撤销");
+  }
+
+  if (removed === "closed") {
+    return result(false, "请先撤销核销后再修改先交记录");
+  }
+
+  return result(false, "先交记录不存在");
 }
 
 export async function writeOffOrderAction(

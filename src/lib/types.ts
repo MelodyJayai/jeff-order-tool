@@ -13,6 +13,8 @@ export type OrderEventType =
   | "CREATED"
   | "UPDATED"
   | "PARTIAL"
+  | "FIRST_DELIVERY"
+  | "FIRST_DELIVERY_REMOVED"
   | "RETURNED"
   | "WRITTEN_OFF"
   | "RETURN_RESOLVED"
@@ -46,8 +48,39 @@ export type OrderRecord = {
   partialDate: string | null;
   partialNote: string;
   note: string;
+  deliveries: OrderDeliveryRecord[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type DeliveryQuantities = {
+  suitQuantity: number;
+  jacketQuantity: number;
+  pantQuantity: number;
+  vestQuantity: number;
+  coatQuantity: number;
+};
+
+export type OrderDeliveryRecord = DeliveryQuantities & {
+  id: string;
+  orderId: string;
+  deliveredAt: string;
+  uncategorizedQuantity: number;
+  note: string;
+  source: "STRUCTURED" | "LEGACY" | "IMPORTED";
+  createdAt: string;
+};
+
+export type AddOrderDeliveryInput = DeliveryQuantities & {
+  orderId: string;
+  deliveredAt: string;
+  note: string;
+};
+
+export type InitialOrderDeliveryInput = DeliveryQuantities & {
+  deliveredAt: string;
+  uncategorizedQuantity: number;
+  note: string;
 };
 
 export type OrderEventRecord = {
@@ -74,6 +107,7 @@ export type CreateOrdersInput = {
   registeredAt: string;
   urgency: UrgencyLevel;
   note: string;
+  initialDelivery: InitialOrderDeliveryInput | null;
 };
 
 export type ImportOrderInput = CreateOrdersInput & {
@@ -96,8 +130,6 @@ export type UpdateOrderInput = {
   id: string;
   companyName: string;
   factoryName: string;
-  firstDelivery: string;
-  customerName: string;
   quantity: number;
   suitQuantity: number;
   jacketQuantity: number;
@@ -106,9 +138,6 @@ export type UpdateOrderInput = {
   coatQuantity: number;
   registeredAt: string;
   urgency: UrgencyLevel;
-  partialQuantity: number | null;
-  partialDate: string | null;
-  partialNote: string;
   note: string;
 };
 
@@ -137,7 +166,7 @@ export type ImportOrdersResult = {
 
 export const statusLabels: Record<OrderStatus, string> = {
   PENDING: "待核销",
-  PARTIAL: "部分交付",
+  PARTIAL: "已先交",
   RETURNED: "返厂修改",
   WRITTEN_OFF: "已核销",
 };

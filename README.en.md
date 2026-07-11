@@ -16,12 +16,12 @@ Many small workshops do not need a full ERP system. They need a practical tool t
 - Select the company and factory for an order.
 - Record quantities by product type.
 - See pending write-off quantities by product type.
-- Mark what the customer wants to deliver first before the full order is done.
+- Record one or more categorized early deliveries before final shipment.
 - Search an order number quickly.
 - Mark an order as shipped.
 - Mark returned-for-alteration items by product type after shipment.
 - Automatically record registration and shipment dates.
-- Track partial delivery notes.
+- Track each early-delivery date, categorized quantity, and note.
 - Keep urgent orders at the top.
 - Open the same local tool from a phone on the office Wi-Fi.
 
@@ -45,26 +45,27 @@ If `JEFF_ADMIN_PASSWORD` is set, the app uses it and skips the first-setup page.
 
 - One persistent order table, no monthly table splitting.
 - Manual order-number registration.
-- Company and factory selection fields.
+- Company and factory selection fields; the redundant customer field is hidden.
 - Automatic registration date.
 - Search by order number.
 - Shipment write-off with automatic shipment date.
 - Returned-for-alteration workflow after shipment, with quantities recorded by fine category.
-- First-delivery request selection, such as "deliver one suit first" or "deliver pants first".
+- Repeatable first-delivery records with quantities for each product category.
 - Fine category quantities:
   - Suit set
   - Shirt / top
   - Pants
   - Vest
   - Coat
-- Pending write-off quantity summary by fine category.
+- Pending write-off quantity summary based on quantities still undelivered.
 - Paired quantity labels, such as "Suit set 128" and "Shirt 98", so totals are easier to read.
 - Urgency levels.
-- Partial delivery quantity/date/note fields, kept separate from first-delivery requests.
+- Cumulative delivered and remaining quantities, with per-delivery history and undo.
+- Order-number ascending sort by default, with registration-date sort options.
 - CSV export.
 - CSV import with order-number based update/insert.
 - Legacy SQLite `.db` backup import, useful when migrating from the old portable package to the installed version.
-- Operation log page for registration, updates, partial delivery, write-off, returned alterations, returned-alteration completion, and undo.
+- Operation log page for registration, updates, early delivery, early-delivery undo, write-off, returned alterations, returned-alteration completion, and undo.
 - Consistent SQLite backup download.
 - Login protection with first-run admin password setup.
 - Automatic backup before CSV import.
@@ -89,7 +90,7 @@ The database is designed with future migration in mind:
 - Orders use stable internal IDs.
 - Order numbers are stored as searchable structured fields.
 - Dates are stored as text dates.
-- Company, factory, first-delivery request, shipment status, returned-alteration quantities, urgency, and fine-category quantities are structured fields.
+- Company, factory, repeatable delivery history, shipment status, returned-alteration quantities, urgency, and fine-category quantities are structured fields.
 - The database records `schema_version` and `schema_migrations`.
 
 Company and factory options are maintained in:

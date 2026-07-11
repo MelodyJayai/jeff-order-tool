@@ -102,7 +102,7 @@ JEFF_BACKUP_DIR=D:\JeffOrderToolCloud\data\backups
 
 ```text
 ghcr.io/melodyjayai/jeff-order-tool:latest
-ghcr.io/melodyjayai/jeff-order-tool:0.1.13
+ghcr.io/melodyjayai/jeff-order-tool:0.1.19
 ```
 
 服务器上不需要构建源码时，可以使用：
@@ -176,5 +176,4 @@ Caddy 负责：
 - 需要多人角色和更强审计。
 - 订单量和并发明显增长。
 
-当前已经保留 `npm run export:postgres`，后续 PostgreSQL 版本会以它为迁移基础继续扩展。
-
+当前已经保留 `npm run export:postgres`，导出内容包括订单、操作日志和逐笔先交记录；后续 PostgreSQL 版本会以它为迁移基础继续扩展。
