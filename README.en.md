@@ -16,6 +16,7 @@ Many small workshops do not need a full ERP system. They need a practical tool t
 - Select the company and factory for an order.
 - Record quantities by product type.
 - See pending write-off quantities by product type.
+- Record a customer's requested early-delivery quantities without marking them as delivered.
 - Record one or more categorized early deliveries before final shipment.
 - Search an order number quickly.
 - Mark an order as shipped.
@@ -50,7 +51,9 @@ If `JEFF_ADMIN_PASSWORD` is set, the app uses it and skips the first-setup page.
 - Search by order number.
 - Shipment write-off with automatic shipment date.
 - Returned-for-alteration workflow after shipment, with quantities recorded by fine category.
-- Repeatable first-delivery records with quantities for each product category.
+- Separate customer early-delivery requests from actual delivery records.
+- Editable requested quantities that do not change shipment status or remaining quantities.
+- Repeatable actual delivery records with quantities for each product category and a confirmation guard.
 - Fine category quantities:
   - Suit set
   - Shirt / top
@@ -60,13 +63,13 @@ If `JEFF_ADMIN_PASSWORD` is set, the app uses it and skips the first-setup page.
 - Pending write-off quantity summary based on quantities still undelivered.
 - Paired quantity labels, such as "Suit set 128" and "Shirt 98", so totals are easier to read.
 - Urgency levels.
-- Cumulative delivered and remaining quantities, with per-delivery history and undo.
-- Compact desktop order details with an inline editable quantity row and a prominent add-delivery action.
+- Cumulative actual-delivery and remaining quantities, with per-delivery history and undo.
+- Compact desktop order details with clearly separated request and actual-delivery sections.
 - Order-number ascending sort by default, with registration-date sort options.
 - CSV export.
 - CSV import with order-number based update/insert.
 - Legacy SQLite `.db` backup import, useful when migrating from the old portable package to the installed version.
-- Operation log page for registration, updates, early delivery, early-delivery undo, write-off, returned alterations, returned-alteration completion, and undo.
+- Operation log page for registration, delivery-request updates, actual delivery, delivery undo, write-off, returned alterations, returned-alteration completion, and undo.
 - Consistent SQLite backup download.
 - Login protection with first-run admin password setup.
 - Automatic backup before CSV import.
@@ -91,7 +94,7 @@ The database is designed with future migration in mind:
 - Orders use stable internal IDs.
 - Order numbers are stored as searchable structured fields.
 - Dates are stored as text dates.
-- Company, factory, repeatable delivery history, shipment status, returned-alteration quantities, urgency, and fine-category quantities are structured fields.
+- Company, factory, customer delivery requests, repeatable actual-delivery history, shipment status, returned-alteration quantities, urgency, and fine-category quantities are structured fields.
 - The database records `schema_version` and `schema_migrations`.
 
 Company and factory options are maintained in:
@@ -248,7 +251,7 @@ Output:
 release-installers/JeffOrderToolSetup-vVERSION.exe
 ```
 
-For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.22.exe`. It adds explicit “save registration changes” and “backfill first delivery” actions, and fixes the Windows updater terminating itself while stopping the old server. Upgrading from `0.1.21` or earlier requires one final manual installer run because those versions contain the broken updater; subsequent in-app updates can complete normally.
+For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.23.exe`. It separates customer early-delivery requests from actual deliveries. Saving a request does not change shipment status or remaining quantities; confirming an actual delivery updates cumulative delivered and remaining quantities after an explicit confirmation prompt.
 
 The installer defaults to the current Windows user's local app directory:
 

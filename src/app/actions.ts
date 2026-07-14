@@ -23,6 +23,7 @@ import {
   removeOrderDelivery,
   undoWriteOffOrder,
   updateOrder,
+  updateOrderDeliveryRequest,
   writeOffOrder,
 } from "@/lib/db";
 import {
@@ -44,6 +45,14 @@ const deliveryFormKeys = {
   pantQuantity: "deliveryPantQuantity",
   vestQuantity: "deliveryVestQuantity",
   coatQuantity: "deliveryCoatQuantity",
+} as const;
+
+const deliveryRequestFormKeys = {
+  suitQuantity: "requestSuitQuantity",
+  jacketQuantity: "requestJacketQuantity",
+  pantQuantity: "requestPantQuantity",
+  vestQuantity: "requestVestQuantity",
+  coatQuantity: "requestCoatQuantity",
 } as const;
 
 function text(formData: FormData, key: string) {
@@ -82,6 +91,25 @@ function deliveryProductQuantities(formData: FormData) {
     (values, item) => ({
       ...values,
       [item.key]: nonNegativeInt(formData, deliveryFormKeys[item.key]),
+    }),
+    {
+      suitQuantity: 0,
+      jacketQuantity: 0,
+      pantQuantity: 0,
+      vestQuantity: 0,
+      coatQuantity: 0,
+    },
+  );
+}
+
+function deliveryRequestProductQuantities(formData: FormData) {
+  return PRODUCT_COLUMNS.reduce(
+    (values, item) => ({
+      ...values,
+      [item.key]: nonNegativeInt(
+        formData,
+        deliveryRequestFormKeys[item.key],
+      ),
     }),
     {
       suitQuantity: 0,
@@ -281,6 +309,30 @@ function csvImportRows(csvText: string): ImportOrderInput[] {
       rowValue(row, ["部分交付日期", "partial date"]),
     );
     const partialNote = rowValue(row, ["部分交付备注", "partial note"]);
+    const deliveryRequestQuantities = {
+      suitQuantity: csvInt(
+        rowValue(row, ["客户要求先交套装", "requested suit"]),
+      ),
+      jacketQuantity: csvInt(
+        rowValue(row, ["客户要求先交单衫", "requested jacket"]),
+      ),
+      pantQuantity: csvInt(
+        rowValue(row, ["客户要求先交单裤", "requested pants"]),
+      ),
+      vestQuantity: csvInt(
+        rowValue(row, ["客户要求先交马甲", "requested vest"]),
+      ),
+      coatQuantity: csvInt(
+        rowValue(row, ["客户要求先交大衣", "requested coat"]),
+      ),
+    };
+    const deliveryRequestNote = rowValue(row, [
+      "客户先交要求备注",
+      "delivery request note",
+    ]);
+    const hasDeliveryRequest =
+      calculateTotalQuantity(deliveryRequestQuantities) > 0 ||
+      Boolean(deliveryRequestNote);
     const initialDeliveryQuantities = {
       suitQuantity: csvInt(rowValue(row, ["累计先交套装"])),
       jacketQuantity: csvInt(rowValue(row, ["累计先交单衫"])),
@@ -331,6 +383,19 @@ function csvImportRows(csvText: string): ImportOrderInput[] {
         partialDate,
         partialNote,
         note: rowValue(row, ["备注", "note"]),
+        deliveryRequest: hasDeliveryRequest
+          ? {
+              requestedAt: cleanDate(
+                rowValue(row, [
+                  "客户先交要求日期",
+                  "delivery request date",
+                ]),
+                registeredAt,
+              ),
+              note: deliveryRequestNote,
+              ...deliveryRequestQuantities,
+            }
+          : null,
         initialDelivery:
           initialDeliveryTotal > 0
             ? {
@@ -368,22 +433,21 @@ export async function createOrdersAction(
   }
 
   const quantities = productQuantities(formData);
-  const initialDeliveryQuantities = deliveryProductQuantities(formData);
-  const initialDeliveryTotal = calculateTotalQuantity(initialDeliveryQuantities);
-  const orderTotal = calculateTotalQuantity(quantities);
+  const deliveryRequestQuantities =
+    deliveryRequestProductQuantities(formData);
+  const deliveryRequestNote = text(formData, "deliveryRequestNote");
+  const hasDeliveryRequest =
+    calculateTotalQuantity(deliveryRequestQuantities) > 0 ||
+    Boolean(deliveryRequestNote);
   const exceededLabels = PRODUCT_COLUMNS.filter(
-    (item) => initialDeliveryQuantities[item.key] > quantities[item.key],
+    (item) => deliveryRequestQuantities[item.key] > quantities[item.key],
   ).map((item) => item.label);
 
   if (exceededLabels.length > 0) {
     return result(
       false,
-      `${exceededLabels.join("、")}的先交数量不能超过订单数量`,
+      `${exceededLabels.join("、")}的客户先交要求不能超过订单数量`,
     );
-  }
-
-  if (initialDeliveryTotal > 0 && initialDeliveryTotal >= orderTotal) {
-    return result(false, "首批先交必须保留未交数量；全部交付请登记后再用出货核销");
   }
 
   const { created, skipped } = createOrders({
@@ -397,18 +461,17 @@ export async function createOrdersAction(
     registeredAt: cleanDate(text(formData, "registeredAt"), chinaToday()),
     urgency: urgency(formData),
     note: text(formData, "note"),
-    initialDelivery:
-      initialDeliveryTotal > 0
-          ? {
-            deliveredAt: cleanDate(
-              text(formData, "deliveryDate"),
-              chinaToday(),
-            ),
-            uncategorizedQuantity: 0,
-            note: text(formData, "deliveryNote"),
-            ...initialDeliveryQuantities,
-          }
-        : null,
+    deliveryRequest: hasDeliveryRequest
+      ? {
+          requestedAt: cleanDate(
+            text(formData, "deliveryRequestDate"),
+            chinaToday(),
+          ),
+          note: deliveryRequestNote,
+          ...deliveryRequestQuantities,
+        }
+      : null,
+    initialDelivery: null,
   });
 
   revalidatePath("/");
@@ -467,6 +530,61 @@ export async function updateOrderAction(
     return result(false, "订单数量不能小于已经先交的细分类数量");
   }
 
+  if (updated === "below_requested") {
+    return result(false, "订单数量不能小于已经登记的客户先交要求");
+  }
+
+  return result(false, "记录不存在");
+}
+
+export async function updateOrderDeliveryRequestAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  if (!(await ensureActionAuthenticated())) {
+    return result(false, "请先登录后再操作");
+  }
+
+  const orderId = text(formData, "orderId");
+
+  if (!orderId) {
+    return result(false, "没有找到这条订单");
+  }
+
+  const updated = updateOrderDeliveryRequest({
+    orderId,
+    requestedAt: cleanDate(
+      text(formData, "deliveryRequestDate"),
+      chinaToday(),
+    ),
+    note: text(formData, "deliveryRequestNote"),
+    ...deliveryRequestProductQuantities(formData),
+  });
+
+  revalidatePath("/");
+  revalidatePath("/events");
+
+  if (updated === "updated") {
+    return result(
+      true,
+      "客户先交要求已保存；这不是交货记录，剩余未交数量没有变化",
+    );
+  }
+
+  if (updated === "cleared") {
+    return result(true, "客户先交要求已清除；剩余未交数量没有变化");
+  }
+
+  if (updated === "closed") {
+    return result(false, "已核销或返厂中的订单不能修改客户先交要求");
+  }
+
+  if (typeof updated === "object" && updated.status === "exceeds") {
+    return result(
+      false,
+      `${updated.labels.join("、")}的客户先交要求不能超过订单数量`,
+    );
+  }
+
   return result(false, "记录不存在");
 }
 
@@ -494,15 +612,15 @@ export async function addOrderDeliveryAction(
   revalidatePath("/events");
 
   if (added === "added") {
-    return result(true, "本次先交已记录，剩余数量已更新");
+    return result(true, "本次实际交货已记录；累计已交增加，剩余未交已减少");
   }
 
   if (added === "empty") {
-    return result(false, "请至少填写一种先交数量");
+    return result(false, "请至少填写一种实际交货数量");
   }
 
   if (added === "closed") {
-    return result(false, "已核销或返厂中的订单不能再登记先交");
+    return result(false, "已核销或返厂中的订单不能再登记实际交货");
   }
 
   if (added === "missing_categories") {
@@ -516,7 +634,7 @@ export async function addOrderDeliveryAction(
   if (typeof added === "object" && added.status === "exceeds") {
     return result(
       false,
-      `${added.labels.join("、")}的先交数量超过剩余未交数量`,
+      `${added.labels.join("、")}的实际交货数量超过剩余未交数量`,
     );
   }
 
@@ -534,7 +652,7 @@ export async function removeOrderDeliveryAction(
   const deliveryId = text(formData, "deliveryId");
 
   if (!orderId || !deliveryId) {
-    return result(false, "没有找到这次先交记录");
+    return result(false, "没有找到这次实际交货记录");
   }
 
   const removed = removeOrderDelivery(orderId, deliveryId);
@@ -543,7 +661,7 @@ export async function removeOrderDeliveryAction(
   revalidatePath("/events");
 
   if (removed === "removed") {
-    return result(true, "这次先交已撤销，剩余数量已恢复");
+    return result(true, "这次实际交货已撤销，剩余未交数量已恢复");
   }
 
   if (removed === "protected") {
@@ -551,10 +669,10 @@ export async function removeOrderDeliveryAction(
   }
 
   if (removed === "closed") {
-    return result(false, "请先撤销核销后再修改先交记录");
+    return result(false, "请先撤销核销后再修改实际交货记录");
   }
 
-  return result(false, "先交记录不存在");
+  return result(false, "实际交货记录不存在");
 }
 
 export async function writeOffOrderAction(

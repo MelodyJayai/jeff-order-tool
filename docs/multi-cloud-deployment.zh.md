@@ -102,7 +102,7 @@ JEFF_BACKUP_DIR=D:\JeffOrderToolCloud\data\backups
 
 ```text
 ghcr.io/melodyjayai/jeff-order-tool:latest
-ghcr.io/melodyjayai/jeff-order-tool:0.1.22
+ghcr.io/melodyjayai/jeff-order-tool:0.1.23
 ```
 
 服务器上不需要构建源码时，可以使用：

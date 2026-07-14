@@ -34,6 +34,7 @@ import {
   removeOrderDeliveryAction,
   undoWriteOffOrderAction,
   updateOrderAction,
+  updateOrderDeliveryRequestAction,
   writeOffOrderAction,
 } from "@/app/actions";
 import { logoutAction } from "@/app/auth-actions";
@@ -116,6 +117,7 @@ const urgencyTone: Record<UrgencyLevel, string> = {
   VERY_URGENT: "border-red-200 bg-red-50 text-red-800",
 };
 const firstDeliveryTone = "border-orange-200 bg-orange-50 text-orange-800";
+const actualDeliveryTone = "border-cyan-200 bg-cyan-50 text-cyan-800";
 
 const controlBaseClass =
   "h-10 w-full rounded-md border px-3 text-sm outline-none transition focus:ring-2";
@@ -160,9 +162,11 @@ const urgencyOptionStyle: Record<UrgencyLevel, CSSProperties> = {
 const eventLabels = {
   CREATED: "登记",
   UPDATED: "更新",
+  DELIVERY_REQUEST_UPDATED: "先交要求",
+  DELIVERY_REQUEST_CLEARED: "清除要求",
   PARTIAL: "部分交付",
-  FIRST_DELIVERY: "先交",
-  FIRST_DELIVERY_REMOVED: "撤销先交",
+  FIRST_DELIVERY: "实际交货",
+  FIRST_DELIVERY_REMOVED: "撤销交货",
   RETURNED: "返厂修改",
   WRITTEN_OFF: "出货核销",
   RETURN_RESOLVED: "完成返厂",
@@ -175,6 +179,14 @@ const deliveryQuantityKeys = {
   pantQuantity: "deliveryPantQuantity",
   vestQuantity: "deliveryVestQuantity",
   coatQuantity: "deliveryCoatQuantity",
+} as const;
+
+const deliveryRequestQuantityKeys = {
+  suitQuantity: "requestSuitQuantity",
+  jacketQuantity: "requestJacketQuantity",
+  pantQuantity: "requestPantQuantity",
+  vestQuantity: "requestVestQuantity",
+  coatQuantity: "requestCoatQuantity",
 } as const;
 
 const orderCodeCollator = new Intl.Collator("zh-Hans-CN", {
@@ -286,8 +298,30 @@ function uncategorizedDelivered(order: OrderRecord) {
   );
 }
 
+function deliveryRequestQuantities(order: OrderRecord) {
+  return {
+    suitQuantity: order.deliveryRequest.suitQuantity,
+    jacketQuantity: order.deliveryRequest.jacketQuantity,
+    pantQuantity: order.deliveryRequest.pantQuantity,
+    vestQuantity: order.deliveryRequest.vestQuantity,
+    coatQuantity: order.deliveryRequest.coatQuantity,
+  };
+}
+
+function hasDeliveryRequest(order: OrderRecord) {
+  return (
+    calculateTotalQuantity(deliveryRequestQuantities(order)) > 0 ||
+    Boolean(order.deliveryRequest.note.trim()) ||
+    Boolean(order.firstDelivery.trim())
+  );
+}
+
+function hasActualDelivery(order: OrderRecord) {
+  return order.deliveries.length > 0;
+}
+
 function hasFirstDelivery(order: OrderRecord) {
-  return order.deliveries.length > 0 || Boolean(order.firstDelivery.trim());
+  return hasDeliveryRequest(order) || hasActualDelivery(order);
 }
 
 function remainingQuantities(order: OrderRecord) {
@@ -643,6 +677,157 @@ function DeliveryQuantityRow({
   );
 }
 
+function DeliveryRequestSection({
+  busy,
+  editable,
+  onSubmit,
+  order,
+  today,
+}: {
+  busy: string | null;
+  editable: boolean;
+  onSubmit: SubmitHandler;
+  order: OrderRecord;
+  today: string;
+}) {
+  const request = deliveryRequestQuantities(order);
+  const requestTotal = calculateTotalQuantity(request);
+  const hasRequest = hasDeliveryRequest(order);
+  const canEdit =
+    editable && (order.status === "PENDING" || order.status === "PARTIAL");
+
+  return (
+    <section className="overflow-hidden rounded-md border border-amber-300">
+      <div className="flex min-h-11 flex-wrap items-center justify-between gap-2 border-b border-amber-300 bg-amber-50 px-3 py-2">
+        <div className="flex items-center gap-2 text-sm font-semibold text-amber-950">
+          <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+          客户要求先交
+        </div>
+        <div className="rounded-sm border border-amber-300 bg-white px-2 py-0.5 text-xs font-semibold text-amber-900">
+          尚未代表已经交货
+        </div>
+      </div>
+
+      {hasRequest ? (
+        <>
+          {requestTotal > 0 ? (
+            <DeliveryQuantityRow
+              label="要求数量"
+              values={request}
+              total={requestTotal}
+              tone="orange"
+            />
+          ) : null}
+          {order.deliveryRequest.requestedAt || order.deliveryRequest.note ? (
+            <div className="grid gap-1 border-b border-amber-200 bg-white px-3 py-2 text-sm text-zinc-700">
+              {order.deliveryRequest.requestedAt ? (
+                <div>客户提出日期：{order.deliveryRequest.requestedAt}</div>
+              ) : null}
+              {order.deliveryRequest.note ? (
+                <div className="break-words">
+                  要求备注：{order.deliveryRequest.note}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {order.firstDelivery ? (
+            <div className="border-b border-amber-200 bg-white px-3 py-2 text-sm text-zinc-700">
+              旧版先交要求：{order.firstDelivery}
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <div className="border-b border-amber-200 bg-white px-3 py-2 text-sm text-zinc-500">
+          当前没有客户先交要求
+        </div>
+      )}
+
+      {canEdit ? (
+        <details
+          key={`${order.id}-${order.deliveryRequest.updatedAt ?? "empty"}`}
+          className="group bg-white"
+        >
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 bg-amber-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 [&::-webkit-details-marker]:hidden">
+            <span className="inline-flex items-center gap-2">
+              <Plus
+                className="h-4 w-4 transition group-open:rotate-45"
+                aria-hidden="true"
+              />
+              {hasRequest ? "修改客户先交要求" : "补登记客户先交要求"}
+            </span>
+            <span className="text-xs font-medium text-amber-50">
+              不会减少剩余数量
+            </span>
+          </summary>
+          <form
+            onSubmit={(event) =>
+              onSubmit(
+                event,
+                updateOrderDeliveryRequestAction,
+                `先交要求-${order.id}`,
+              )
+            }
+            className="grid gap-2 border-t border-amber-200 p-3"
+          >
+            <input type="hidden" name="orderId" value={order.id} />
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              {PRODUCT_COLUMNS.map((item) => (
+                <Field
+                  key={item.key}
+                  label={`${item.label}（订单${order[item.key]}）`}
+                >
+                  <input
+                    name={deliveryRequestQuantityKeys[item.key]}
+                    type="number"
+                    min={0}
+                    max={order[item.key]}
+                    inputMode="numeric"
+                    defaultValue={request[item.key]}
+                    className={fieldClass()}
+                  />
+                </Field>
+              ))}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[150px_minmax(0,1fr)_170px] sm:items-end">
+              <Field label="客户提出日期">
+                <input
+                  name="deliveryRequestDate"
+                  type="date"
+                  defaultValue={order.deliveryRequest.requestedAt ?? today}
+                  required
+                  className={fieldClass()}
+                />
+              </Field>
+              <Field label="客户要求备注">
+                <input
+                  name="deliveryRequestNote"
+                  defaultValue={order.deliveryRequest.note}
+                  className={fieldClass()}
+                  placeholder="可不填"
+                />
+              </Field>
+              <button
+                type="submit"
+                disabled={Boolean(busy)}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-amber-600 px-3 text-sm font-medium text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
+                title="只保存客户要求，不登记实际交货"
+              >
+                <Save className="h-4 w-4" aria-hidden="true" />
+                {busy === `先交要求-${order.id}`
+                  ? "保存中"
+                  : "保存客户要求"}
+              </button>
+            </div>
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-950">
+              此处保存后，订单仍是待核销，不会增加累计已交，也不会减少剩余未交。
+            </div>
+          </form>
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
 function DeliverySection({
   busy,
   editable,
@@ -665,44 +850,52 @@ function DeliverySection({
   const deliveries = [...order.deliveries].reverse();
 
   return (
-    <section className="overflow-hidden rounded-md border border-orange-200">
-      <div className="flex min-h-11 items-center justify-between gap-3 border-b border-orange-200 bg-orange-50 px-3 py-2">
-        <div className="flex items-center gap-2 text-sm font-semibold text-orange-950">
+    <section className="overflow-hidden rounded-md border border-cyan-200">
+      <div className="flex min-h-11 items-center justify-between gap-3 border-b border-cyan-200 bg-cyan-50 px-3 py-2">
+        <div className="flex items-center gap-2 text-sm font-semibold text-cyan-950">
           <Clock3 className="h-4 w-4" aria-hidden="true" />
-          先交登记
+          实际交货记录
         </div>
-        <div className="text-xs font-medium text-orange-800">
-          {order.deliveries.length} 次
+        <div className="text-xs font-medium text-cyan-800">
+          已实际先交 {order.deliveries.length} 次
         </div>
       </div>
 
       {canAdd ? (
         <details
           key={`${order.id}-${order.deliveries.length}`}
-          className="group border-b border-orange-200 bg-white"
+          className="group border-b border-cyan-200 bg-white"
         >
-          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 bg-orange-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-orange-800 [&::-webkit-details-marker]:hidden">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 bg-cyan-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800 [&::-webkit-details-marker]:hidden">
             <span className="inline-flex items-center gap-2">
               <Plus
                 className="h-4 w-4 transition group-open:rotate-45"
                 aria-hidden="true"
               />
-              更改登记：补填先交
+              确认本次实际已经交货
             </span>
-            <span className="text-xs font-medium text-orange-100">
-              填写数量
+            <span className="text-xs font-medium text-cyan-100">
+              会减少剩余数量
             </span>
           </summary>
           <form
-            onSubmit={(event) =>
-              onSubmit(
+            onSubmit={(event) => {
+              if (
+                !window.confirm(
+                  "确认这些衣服已经实际交给客户？保存后会减少剩余未交数量。",
+                )
+              ) {
+                event.preventDefault();
+                return;
+              }
+              void onSubmit(
                 event,
                 addOrderDeliveryAction,
-                `先交-${order.id}`,
+                `实际交货-${order.id}`,
                 true,
-              )
-            }
-            className="grid gap-2 border-t border-orange-100 p-3"
+              );
+            }}
+            className="grid gap-2 border-t border-cyan-100 p-3"
           >
             <input type="hidden" name="orderId" value={order.id} />
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
@@ -724,7 +917,7 @@ function DeliverySection({
               ))}
             </div>
             <div className="grid gap-2 sm:grid-cols-[150px_minmax(0,1fr)_150px] sm:items-end">
-              <Field label="先交日期">
+              <Field label="实际交货日期">
                 <input
                   name="deliveryDate"
                   type="date"
@@ -733,7 +926,7 @@ function DeliverySection({
                   className={fieldClass()}
                 />
               </Field>
-              <Field label="本次先交备注">
+              <Field label="本次实际交货备注">
                 <input
                   name="deliveryNote"
                   className={fieldClass()}
@@ -747,12 +940,17 @@ function DeliverySection({
                   remainingTotal(order) <= 1 ||
                   calculateTotalQuantity(remaining) <= 0
                 }
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-orange-700 px-3 text-sm font-medium text-white transition hover:bg-orange-800 disabled:cursor-not-allowed disabled:bg-orange-300"
-                title="保存补登记的先交数量"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-cyan-700 px-3 text-sm font-medium text-white transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-cyan-300"
+                title="确认衣服已经实际交给客户"
               >
                 <Save className="h-4 w-4" aria-hidden="true" />
-                {busy === `先交-${order.id}` ? "保存中" : "保存先交"}
+                {busy === `实际交货-${order.id}`
+                  ? "保存中"
+                  : "确认实际已交"}
               </button>
+            </div>
+            <div className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-950">
+              只有衣服已经交到客户手上时才保存这里；保存后累计已交会增加，剩余未交会减少。
             </div>
             {remainingTotal(order) <= 1 ? (
               <div className="text-xs font-medium text-zinc-500">
@@ -764,13 +962,13 @@ function DeliverySection({
       ) : null}
 
       <DeliveryQuantityRow
-        label="累计先交"
+        label="累计实际已交"
         values={delivered}
         total={deliveredTotal}
-        tone="orange"
+        tone="blue"
       />
       {uncategorizedDelivered(order) > 0 ? (
-        <div className="border-b border-orange-200 bg-orange-50 px-3 pb-3 text-xs font-medium text-orange-800">
+        <div className="border-b border-cyan-200 bg-cyan-50 px-3 pb-3 text-xs font-medium text-cyan-800">
           其中旧记录未分细类 {uncategorizedDelivered(order)} 件
         </div>
       ) : null}
@@ -781,12 +979,6 @@ function DeliverySection({
         tone="blue"
       />
 
-      {order.firstDelivery ? (
-        <div className="border-b border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700">
-          旧版先交备注：{order.firstDelivery}
-        </div>
-      ) : null}
-
       {deliveries.length > 0 ? (
         <div className="divide-y divide-zinc-100 bg-white">
           {deliveries.map((delivery) => (
@@ -796,7 +988,7 @@ function DeliverySection({
             >
               <div className="min-w-0">
                 <div className="font-medium text-zinc-950">
-                  {delivery.deliveredAt} · {deliveryRecordSummary(delivery)}
+                  实际交货 {delivery.deliveredAt} · {deliveryRecordSummary(delivery)}
                 </div>
                 {delivery.note ? (
                   <div className="mt-1 break-words text-xs text-zinc-500">
@@ -820,12 +1012,12 @@ function DeliverySection({
                     type="submit"
                     disabled={Boolean(busy)}
                     onClick={(event) => {
-                      if (!window.confirm("确认撤销这一笔先交记录？")) {
+                      if (!window.confirm("确认撤销这一笔实际交货记录？")) {
                         event.preventDefault();
                       }
                     }}
                     className="inline-flex h-8 shrink-0 items-center justify-center rounded-md border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:text-zinc-400"
-                    title="撤销这笔先交"
+                    title="撤销这笔实际交货"
                   >
                     <RotateCcw className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
                     {busy === `撤销先交-${delivery.id}` ? "撤销中" : "撤销"}
@@ -1337,8 +1529,11 @@ function OrderRow({
               {urgencyLabels[order.urgency]}
             </Badge>
           ) : null}
-          {hasFirstDelivery(order) ? (
-            <Badge className={firstDeliveryTone}>先交</Badge>
+          {hasDeliveryRequest(order) ? (
+            <Badge className={firstDeliveryTone}>先交要求</Badge>
+          ) : null}
+          {hasActualDelivery(order) ? (
+            <Badge className={actualDeliveryTone}>已实际先交</Badge>
           ) : null}
         </div>
       </div>
@@ -1348,16 +1543,21 @@ function OrderRow({
         <span>数量 {orderQuantity(order)}</span>
         {order.deliveries.length > 0 ? (
           <span>
-            累计先交 {quantitySummary(delivered) || uncategorizedDelivered(order)}
+            累计实际已交 {quantitySummary(delivered) || uncategorizedDelivered(order)}
           </span>
         ) : null}
-        {order.status !== "WRITTEN_OFF" && hasFirstDelivery(order) ? (
+        {hasDeliveryRequest(order) ? (
+          <span>
+            客户要求 {quantitySummary(deliveryRequestQuantities(order)) || "见备注"}
+          </span>
+        ) : null}
+        {order.status !== "WRITTEN_OFF" && hasActualDelivery(order) ? (
           <span>
             剩余 {quantitySummary(remaining) || remainingTotal(order)}（小计
             {remainingTotal(order)}）
           </span>
         ) : null}
-        {order.firstDelivery ? <span>旧备注 {order.firstDelivery}</span> : null}
+        {order.firstDelivery ? <span>旧要求 {order.firstDelivery}</span> : null}
         {summary ? <span>{summary}</span> : null}
         {returnedSummary ? (
           <span>
@@ -1396,8 +1596,11 @@ function MobileDetail({
           <Badge className={urgencyTone[order.urgency]}>
             {urgencyLabels[order.urgency]}
           </Badge>
-          {hasFirstDelivery(order) ? (
-            <Badge className={firstDeliveryTone}>先交</Badge>
+          {hasDeliveryRequest(order) ? (
+            <Badge className={firstDeliveryTone}>先交要求</Badge>
+          ) : null}
+          {hasActualDelivery(order) ? (
+            <Badge className={actualDeliveryTone}>已实际先交</Badge>
           ) : null}
         </div>
       </div>
@@ -1468,7 +1671,17 @@ function MobileDetail({
         </div>
       ) : null}
 
-      {hasFirstDelivery(order) ? (
+      {hasDeliveryRequest(order) ? (
+        <DeliveryRequestSection
+          busy={busy}
+          editable={false}
+          onSubmit={onSubmit}
+          order={order}
+          today={today}
+        />
+      ) : null}
+
+      {hasActualDelivery(order) ? (
         <DeliverySection
           busy={busy}
           editable={false}
@@ -1797,6 +2010,13 @@ export function Workbench({
       "返厂大衣",
       "返厂备注",
       "急单等级",
+      "客户先交要求日期",
+      "客户要求先交套装",
+      "客户要求先交单衫",
+      "客户要求先交单裤",
+      "客户要求先交马甲",
+      "客户要求先交大衣",
+      "客户先交要求备注",
       "先交次数",
       "累计先交套装",
       "累计先交单衫",
@@ -1847,6 +2067,11 @@ export function Workbench({
         String(order.returnCoatQuantity),
         order.returnNote,
         urgencyLabels[order.urgency],
+        order.deliveryRequest.requestedAt ?? "",
+        ...PRODUCT_COLUMNS.map((item) =>
+          String(order.deliveryRequest[item.key]),
+        ),
+        order.deliveryRequest.note || order.firstDelivery,
         String(order.deliveries.length),
         ...PRODUCT_COLUMNS.map((item) => String(delivered[item.key])),
         String(uncategorizedDelivered(order)),
@@ -1966,7 +2191,7 @@ export function Workbench({
             value={stats.todayWrittenOff}
           />
           <Stat icon={ListChecks} label="待核销" value={stats.open} />
-          <Stat icon={Clock3} label="先交" value={stats.firstDeliveryOpen} />
+          <Stat icon={Clock3} label="先交关注" value={stats.firstDeliveryOpen} />
           <Stat icon={Flame} label="急单" value={stats.urgentOpen} />
         </section>
 
@@ -2110,18 +2335,22 @@ export function Workbench({
                   <div className="overflow-hidden rounded-md border border-orange-200">
                     <div className="flex items-center justify-between gap-3 border-b border-orange-200 bg-orange-50 px-3 py-2">
                       <span className="text-sm font-semibold text-orange-950">
-                        首批先交（没有可不填）
+                        客户要求先交（尚未交货，没有可不填）
                       </span>
                       <span className="text-xs font-medium text-orange-800">
-                        以后还能继续追加
+                        只记录要求，不扣减剩余数量
                       </span>
                     </div>
-                    <input type="hidden" name="deliveryDate" value={today} />
+                    <input
+                      type="hidden"
+                      name="deliveryRequestDate"
+                      value={today}
+                    />
                     <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-5">
                       {PRODUCT_COLUMNS.map((item) => (
                         <Field key={item.key} label={item.label}>
                           <input
-                            name={deliveryQuantityKeys[item.key]}
+                            name={deliveryRequestQuantityKeys[item.key]}
                             type="number"
                             min={0}
                             inputMode="numeric"
@@ -2132,13 +2361,16 @@ export function Workbench({
                       ))}
                     </div>
                     <div className="px-3 pb-3">
-                      <Field label="首批先交备注">
+                      <Field label="客户先交要求备注">
                         <input
-                          name="deliveryNote"
+                          name="deliveryRequestNote"
                           className={fieldClass()}
                           placeholder="可不填"
                         />
                       </Field>
+                    </div>
+                    <div className="border-t border-orange-200 bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-950">
+                      保存订单时只会登记客户要求，不会当作衣服已经交给客户。
                     </div>
                   </div>
                   <div className="text-xs font-medium text-zinc-500">
@@ -2173,7 +2405,7 @@ export function Workbench({
             <section className="rounded-md border border-zinc-200 bg-white">
               <div className="flex h-12 items-center gap-2 border-b border-zinc-200 px-4 text-sm font-semibold">
                 <Clock3 className="h-4 w-4 text-orange-700" />
-                先交
+                先交关注
               </div>
               <div>
                 {firstDeliveryOrders.length > 0 ? (
@@ -2248,8 +2480,11 @@ export function Workbench({
                     <Badge className={urgencyTone[selected.urgency]}>
                       {urgencyLabels[selected.urgency]}
                     </Badge>
-                    {hasFirstDelivery(selected) ? (
-                      <Badge className={firstDeliveryTone}>先交</Badge>
+                    {hasDeliveryRequest(selected) ? (
+                      <Badge className={firstDeliveryTone}>先交要求</Badge>
+                    ) : null}
+                    {hasActualDelivery(selected) ? (
+                      <Badge className={actualDeliveryTone}>已实际先交</Badge>
                     ) : null}
                   </div>
                 ) : null}
@@ -2276,8 +2511,8 @@ export function Workbench({
                         <span>返厂 {selected.returnedAt}</span>
                       ) : null}
                       <span>数量 {orderQuantity(selected)}</span>
-                      {hasFirstDelivery(selected) ? (
-                        <span className="font-medium text-orange-800">
+                      {hasActualDelivery(selected) ? (
+                        <span className="font-medium text-cyan-800">
                           剩余未交 {remainingTotal(selected)}
                         </span>
                       ) : null}
@@ -2348,7 +2583,7 @@ export function Workbench({
                         </label>
                       ))}
                     </div>
-                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px] sm:items-end">
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_170px] sm:items-end">
                       <Field label="备注">
                         <textarea
                           name="note"
@@ -2360,7 +2595,7 @@ export function Workbench({
                       <button
                         type="submit"
                         disabled={Boolean(busy)}
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-blue-600 bg-blue-600 px-4 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-blue-300 disabled:bg-blue-300"
+                        className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-blue-600 bg-blue-600 px-4 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-blue-300 disabled:bg-blue-300"
                         title="保存登记更改"
                       >
                         <Save className="h-4 w-4" aria-hidden="true" />
@@ -2368,6 +2603,14 @@ export function Workbench({
                       </button>
                     </div>
                   </form>
+
+                  <DeliveryRequestSection
+                    busy={busy}
+                    editable
+                    onSubmit={submit}
+                    order={selected}
+                    today={today}
+                  />
 
                   <DeliverySection
                     busy={busy}

@@ -58,6 +58,14 @@ const lines = [
   company_name TEXT,
   factory_name TEXT,
   first_delivery TEXT,
+  request_suit_quantity INTEGER NOT NULL DEFAULT 0,
+  request_jacket_quantity INTEGER NOT NULL DEFAULT 0,
+  request_pant_quantity INTEGER NOT NULL DEFAULT 0,
+  request_vest_quantity INTEGER NOT NULL DEFAULT 0,
+  request_coat_quantity INTEGER NOT NULL DEFAULT 0,
+  delivery_request_date TEXT,
+  delivery_request_note TEXT,
+  delivery_request_updated_at TEXT,
   customer_name TEXT,
   product_name TEXT,
   quantity INTEGER NOT NULL DEFAULT 1,
@@ -85,6 +93,15 @@ const lines = [
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );`,
+  "",
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS request_suit_quantity INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS request_jacket_quantity INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS request_pant_quantity INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS request_vest_quantity INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS request_coat_quantity INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_request_date TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_request_note TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_request_updated_at TEXT;`,
   "",
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_company_code_unique
 ON orders (lower(trim(coalesce(company_name, ''))), lower(trim(code)));`,

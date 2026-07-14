@@ -12,6 +12,8 @@ export type UrgencyLevel = (typeof URGENCY_LEVELS)[number];
 export type OrderEventType =
   | "CREATED"
   | "UPDATED"
+  | "DELIVERY_REQUEST_UPDATED"
+  | "DELIVERY_REQUEST_CLEARED"
   | "PARTIAL"
   | "FIRST_DELIVERY"
   | "FIRST_DELIVERY_REMOVED"
@@ -48,6 +50,7 @@ export type OrderRecord = {
   partialDate: string | null;
   partialNote: string;
   note: string;
+  deliveryRequest: OrderDeliveryRequest;
   deliveries: OrderDeliveryRecord[];
   createdAt: string;
   updatedAt: string;
@@ -59,6 +62,23 @@ export type DeliveryQuantities = {
   pantQuantity: number;
   vestQuantity: number;
   coatQuantity: number;
+};
+
+export type OrderDeliveryRequest = DeliveryQuantities & {
+  requestedAt: string | null;
+  note: string;
+  updatedAt: string | null;
+};
+
+export type UpdateOrderDeliveryRequestInput = DeliveryQuantities & {
+  orderId: string;
+  requestedAt: string;
+  note: string;
+};
+
+export type InitialOrderDeliveryRequestInput = DeliveryQuantities & {
+  requestedAt: string;
+  note: string;
 };
 
 export type OrderDeliveryRecord = DeliveryQuantities & {
@@ -107,6 +127,7 @@ export type CreateOrdersInput = {
   registeredAt: string;
   urgency: UrgencyLevel;
   note: string;
+  deliveryRequest: InitialOrderDeliveryRequestInput | null;
   initialDelivery: InitialOrderDeliveryInput | null;
 };
 

@@ -21,6 +21,7 @@ import type {
   OrderRecord,
   OrderStatus,
   ReturnOrderInput,
+  UpdateOrderDeliveryRequestInput,
   UpdateOrderInput,
   UrgencyLevel,
 } from "@/lib/types";
@@ -31,6 +32,14 @@ type OrderRow = {
   company_name: string | null;
   factory_name: string | null;
   first_delivery: string | null;
+  request_suit_quantity: number | null;
+  request_jacket_quantity: number | null;
+  request_pant_quantity: number | null;
+  request_vest_quantity: number | null;
+  request_coat_quantity: number | null;
+  delivery_request_date: string | null;
+  delivery_request_note: string | null;
+  delivery_request_updated_at: string | null;
   customer_name: string | null;
   product_name: string | null;
   quantity: number;
@@ -93,7 +102,7 @@ const DB_PATH = process.env.JEFF_ORDER_DB_PATH
 const BACKUP_DIR = process.env.JEFF_BACKUP_DIR
   ? path.resolve(process.env.JEFF_BACKUP_DIR)
   : path.join(path.dirname(DB_PATH), "backups");
-const SCHEMA_VERSION = "2026-07-11-v6-order-deliveries";
+const SCHEMA_VERSION = "2026-07-14-v7-delivery-requests";
 
 function productValues(input: Record<ProductQuantityKey, number>) {
   return {
@@ -378,6 +387,14 @@ function createOrdersTableSql(tableName: string) {
       company_name TEXT,
       factory_name TEXT,
       first_delivery TEXT,
+      request_suit_quantity INTEGER NOT NULL DEFAULT 0,
+      request_jacket_quantity INTEGER NOT NULL DEFAULT 0,
+      request_pant_quantity INTEGER NOT NULL DEFAULT 0,
+      request_vest_quantity INTEGER NOT NULL DEFAULT 0,
+      request_coat_quantity INTEGER NOT NULL DEFAULT 0,
+      delivery_request_date TEXT,
+      delivery_request_note TEXT,
+      delivery_request_updated_at TEXT,
       customer_name TEXT,
       product_name TEXT,
       quantity INTEGER NOT NULL DEFAULT 1,
@@ -443,7 +460,11 @@ function rebuildOrdersWithoutGlobalCodeUnique(db: Database.Database) {
       db.exec(createOrdersTableSql("orders_v3_company_code"));
       db.exec(`
         INSERT INTO orders_v3_company_code (
-          id, code, company_name, factory_name, first_delivery, customer_name, product_name,
+          id, code, company_name, factory_name, first_delivery,
+          request_suit_quantity, request_jacket_quantity, request_pant_quantity,
+          request_vest_quantity, request_coat_quantity, delivery_request_date,
+          delivery_request_note, delivery_request_updated_at,
+          customer_name, product_name,
           quantity, suit_quantity, jacket_quantity, pant_quantity,
           vest_quantity, coat_quantity, extra_fee, registered_at, status,
           written_off_at, returned_at, return_note,
@@ -452,7 +473,11 @@ function rebuildOrdersWithoutGlobalCodeUnique(db: Database.Database) {
           partial_quantity, partial_date, partial_note, note, created_at, updated_at
         )
         SELECT
-          id, code, company_name, factory_name, first_delivery, customer_name, product_name,
+          id, code, company_name, factory_name, first_delivery,
+          request_suit_quantity, request_jacket_quantity, request_pant_quantity,
+          request_vest_quantity, request_coat_quantity, delivery_request_date,
+          delivery_request_note, delivery_request_updated_at,
+          customer_name, product_name,
           quantity, suit_quantity, jacket_quantity, pant_quantity,
           vest_quantity, coat_quantity, extra_fee, registered_at, status,
           written_off_at, returned_at, return_note,
@@ -550,6 +575,54 @@ function ensureSchema(db: Database.Database) {
   ensureColumn(db, "orders", "company_name", "company_name TEXT");
   ensureColumn(db, "orders", "factory_name", "factory_name TEXT");
   ensureColumn(db, "orders", "first_delivery", "first_delivery TEXT");
+  ensureColumn(
+    db,
+    "orders",
+    "request_suit_quantity",
+    "request_suit_quantity INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureColumn(
+    db,
+    "orders",
+    "request_jacket_quantity",
+    "request_jacket_quantity INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureColumn(
+    db,
+    "orders",
+    "request_pant_quantity",
+    "request_pant_quantity INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureColumn(
+    db,
+    "orders",
+    "request_vest_quantity",
+    "request_vest_quantity INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureColumn(
+    db,
+    "orders",
+    "request_coat_quantity",
+    "request_coat_quantity INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureColumn(
+    db,
+    "orders",
+    "delivery_request_date",
+    "delivery_request_date TEXT",
+  );
+  ensureColumn(
+    db,
+    "orders",
+    "delivery_request_note",
+    "delivery_request_note TEXT",
+  );
+  ensureColumn(
+    db,
+    "orders",
+    "delivery_request_updated_at",
+    "delivery_request_updated_at TEXT",
+  );
   ensureColumn(
     db,
     "orders",
@@ -670,6 +743,7 @@ function ensureSchema(db: Database.Database) {
   recordMigration(db, "2026-06-07-v4-return-quantities");
   recordMigration(db, "2026-06-08-v5-first-delivery");
   recordMigration(db, "2026-07-11-v6-order-deliveries");
+  recordMigration(db, "2026-07-14-v7-delivery-requests");
   setMeta(db, "schema_version", SCHEMA_VERSION);
   setMeta(db, "app_name", "jeff-order-tool");
 }
@@ -744,6 +818,16 @@ function mapOrder(
     partialDate: row.partial_date,
     partialNote: row.partial_note ?? "",
     note: row.note ?? "",
+    deliveryRequest: {
+      suitQuantity: row.request_suit_quantity ?? 0,
+      jacketQuantity: row.request_jacket_quantity ?? 0,
+      pantQuantity: row.request_pant_quantity ?? 0,
+      vestQuantity: row.request_vest_quantity ?? 0,
+      coatQuantity: row.request_coat_quantity ?? 0,
+      requestedAt: row.delivery_request_date,
+      note: row.delivery_request_note ?? "",
+      updatedAt: row.delivery_request_updated_at,
+    },
     deliveries,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -771,6 +855,8 @@ function insertEvent(
 function toEventType(value: string): OrderEventType {
   if (
     value === "UPDATED" ||
+    value === "DELIVERY_REQUEST_UPDATED" ||
+    value === "DELIVERY_REQUEST_CLEARED" ||
     value === "PARTIAL" ||
     value === "FIRST_DELIVERY" ||
     value === "FIRST_DELIVERY_REMOVED" ||
@@ -1053,18 +1139,32 @@ export function createOrders(input: CreateOrdersInput) {
       INSERT INTO orders (
         id, code, company_name, factory_name, first_delivery, customer_name, quantity,
         suit_quantity, jacket_quantity, pant_quantity, vest_quantity,
-        coat_quantity, registered_at, status, urgency, note,
+        coat_quantity,
+        request_suit_quantity, request_jacket_quantity, request_pant_quantity,
+        request_vest_quantity, request_coat_quantity, delivery_request_date,
+        delivery_request_note, delivery_request_updated_at,
+        registered_at, status, urgency, note,
         created_at, updated_at
       )
       VALUES (
         @id, @code, @companyName, @factoryName, @firstDelivery, @customerName, @quantity,
         @suitQuantity, @jacketQuantity, @pantQuantity, @vestQuantity,
-        @coatQuantity, @registeredAt, @status, @urgency, @note,
+        @coatQuantity,
+        @requestSuitQuantity, @requestJacketQuantity, @requestPantQuantity,
+        @requestVestQuantity, @requestCoatQuantity, @deliveryRequestDate,
+        @deliveryRequestNote, @deliveryRequestUpdatedAt,
+        @registeredAt, @status, @urgency, @note,
         @createdAt, @updatedAt
       )
     `);
     const quantities = productValues(input);
     const quantity = totalQuantity(quantities, input.quantity);
+    const deliveryRequest = input.deliveryRequest;
+    const hasDeliveryRequest = Boolean(
+      deliveryRequest &&
+        (deliveryQuantityTotal(deliveryRequest) > 0 ||
+          deliveryRequest.note.trim()),
+    );
     const initialDeliveryTotal = input.initialDelivery
       ? deliveryQuantityTotal(input.initialDelivery) +
         input.initialDelivery.uncategorizedQuantity
@@ -1086,6 +1186,18 @@ export function createOrders(input: CreateOrdersInput) {
         customerName: input.customerName || null,
         quantity,
         ...quantities,
+        requestSuitQuantity: deliveryRequest?.suitQuantity ?? 0,
+        requestJacketQuantity: deliveryRequest?.jacketQuantity ?? 0,
+        requestPantQuantity: deliveryRequest?.pantQuantity ?? 0,
+        requestVestQuantity: deliveryRequest?.vestQuantity ?? 0,
+        requestCoatQuantity: deliveryRequest?.coatQuantity ?? 0,
+        deliveryRequestDate: hasDeliveryRequest
+          ? deliveryRequest!.requestedAt
+          : null,
+        deliveryRequestNote: hasDeliveryRequest
+          ? deliveryRequest!.note || null
+          : null,
+        deliveryRequestUpdatedAt: hasDeliveryRequest ? now : null,
         registeredAt: input.registeredAt,
         status: initialDeliveryTotal > 0 ? "PARTIAL" : "PENDING",
         urgency: input.urgency,
@@ -1101,6 +1213,19 @@ export function createOrders(input: CreateOrdersInput) {
           input.firstDelivery ? `；${input.firstDelivery}` : ""
         }`,
       );
+      if (hasDeliveryRequest && deliveryRequest) {
+        insertEvent(
+          db,
+          id,
+          "DELIVERY_REQUEST_UPDATED",
+          `客户要求先交 ${deliveryRequest.requestedAt}：${[
+            deliverySummary(deliveryRequest),
+            deliveryRequest.note,
+          ]
+            .filter(Boolean)
+            .join("；")}`,
+        );
+      }
       if (input.initialDelivery && initialDeliveryTotal > 0) {
         insertDelivery(db, {
           orderId: id,
@@ -1140,7 +1265,11 @@ export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
       INSERT INTO orders (
         id, code, company_name, factory_name, first_delivery, customer_name, quantity,
         suit_quantity, jacket_quantity, pant_quantity, vest_quantity,
-        coat_quantity, registered_at, status, written_off_at, urgency,
+        coat_quantity,
+        request_suit_quantity, request_jacket_quantity, request_pant_quantity,
+        request_vest_quantity, request_coat_quantity, delivery_request_date,
+        delivery_request_note, delivery_request_updated_at,
+        registered_at, status, written_off_at, urgency,
         returned_at, return_note, return_suit_quantity, return_jacket_quantity,
         return_pant_quantity, return_vest_quantity, return_coat_quantity,
         partial_quantity, partial_date, partial_note, note,
@@ -1149,7 +1278,11 @@ export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
       VALUES (
         @id, @code, @companyName, @factoryName, @firstDelivery, @customerName, @quantity,
         @suitQuantity, @jacketQuantity, @pantQuantity, @vestQuantity,
-        @coatQuantity, @registeredAt, @status, @writtenOffAt, @urgency,
+        @coatQuantity,
+        @requestSuitQuantity, @requestJacketQuantity, @requestPantQuantity,
+        @requestVestQuantity, @requestCoatQuantity, @deliveryRequestDate,
+        @deliveryRequestNote, @deliveryRequestUpdatedAt,
+        @registeredAt, @status, @writtenOffAt, @urgency,
         @returnedAt, @returnNote, @returnSuitQuantity, @returnJacketQuantity,
         @returnPantQuantity, @returnVestQuantity, @returnCoatQuantity,
         @partialQuantity, @partialDate, @partialNote, @note,
@@ -1168,6 +1301,14 @@ export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
           pant_quantity = @pantQuantity,
           vest_quantity = @vestQuantity,
           coat_quantity = @coatQuantity,
+          request_suit_quantity = @requestSuitQuantity,
+          request_jacket_quantity = @requestJacketQuantity,
+          request_pant_quantity = @requestPantQuantity,
+          request_vest_quantity = @requestVestQuantity,
+          request_coat_quantity = @requestCoatQuantity,
+          delivery_request_date = @deliveryRequestDate,
+          delivery_request_note = @deliveryRequestNote,
+          delivery_request_updated_at = @deliveryRequestUpdatedAt,
           registered_at = @registeredAt,
           status = @status,
           written_off_at = @writtenOffAt,
@@ -1198,6 +1339,35 @@ export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
       const quantities = productValues(item);
       const returnQuantities = returnProductValues(item);
       const quantity = totalQuantity(quantities, item.quantity);
+      const importedRequest = item.deliveryRequest
+        ? {
+            suitQuantity: Math.min(
+              item.deliveryRequest.suitQuantity,
+              quantities.suitQuantity,
+            ),
+            jacketQuantity: Math.min(
+              item.deliveryRequest.jacketQuantity,
+              quantities.jacketQuantity,
+            ),
+            pantQuantity: Math.min(
+              item.deliveryRequest.pantQuantity,
+              quantities.pantQuantity,
+            ),
+            vestQuantity: Math.min(
+              item.deliveryRequest.vestQuantity,
+              quantities.vestQuantity,
+            ),
+            coatQuantity: Math.min(
+              item.deliveryRequest.coatQuantity,
+              quantities.coatQuantity,
+            ),
+          }
+        : null;
+      const hasImportedRequest = Boolean(
+        item.deliveryRequest &&
+          ((importedRequest && deliveryQuantityTotal(importedRequest) > 0) ||
+            item.deliveryRequest.note.trim()),
+      );
       const current = findOrderByCompanyCode(db, item.companyName, code);
       const existingDeliveryCount = current
         ? (
@@ -1259,6 +1429,18 @@ export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
         customerName: item.customerName || null,
         quantity,
         ...quantities,
+        requestSuitQuantity: importedRequest?.suitQuantity ?? 0,
+        requestJacketQuantity: importedRequest?.jacketQuantity ?? 0,
+        requestPantQuantity: importedRequest?.pantQuantity ?? 0,
+        requestVestQuantity: importedRequest?.vestQuantity ?? 0,
+        requestCoatQuantity: importedRequest?.coatQuantity ?? 0,
+        deliveryRequestDate: hasImportedRequest
+          ? item.deliveryRequest!.requestedAt
+          : null,
+        deliveryRequestNote: hasImportedRequest
+          ? item.deliveryRequest!.note || null
+          : null,
+        deliveryRequestUpdatedAt: hasImportedRequest ? now : null,
         registeredAt: item.registeredAt,
         status: importedStatus,
         writtenOffAt: item.status === "WRITTEN_OFF" ? item.writtenOffAt : null,
@@ -1474,6 +1656,17 @@ export function importOrdersFromSqliteBackup(sourcePath: string) {
       const writtenOffAt = optionalDate(textValue(row, "written_off_at"));
       const returnedAt = optionalDate(textValue(row, "returned_at"));
       const status = sqliteImportStatus(row, writtenOffAt, returnedAt);
+      const deliveryRequestQuantities = {
+        suitQuantity: positiveValue(row, "request_suit_quantity"),
+        jacketQuantity: positiveValue(row, "request_jacket_quantity"),
+        pantQuantity: positiveValue(row, "request_pant_quantity"),
+        vestQuantity: positiveValue(row, "request_vest_quantity"),
+        coatQuantity: positiveValue(row, "request_coat_quantity"),
+      };
+      const deliveryRequestNote = textValue(row, "delivery_request_note");
+      const hasDeliveryRequest =
+        deliveryQuantityTotal(deliveryRequestQuantities) > 0 ||
+        Boolean(deliveryRequestNote);
 
       return [
         {
@@ -1510,6 +1703,16 @@ export function importOrdersFromSqliteBackup(sourcePath: string) {
             ? ""
             : textValue(row, "partial_note"),
           note: textValue(row, "note"),
+          deliveryRequest: hasDeliveryRequest
+            ? {
+                requestedAt: cleanDate(
+                  textValue(row, "delivery_request_date"),
+                  cleanDate(textValue(row, "registered_at"), chinaToday()),
+                ),
+                note: deliveryRequestNote,
+                ...deliveryRequestQuantities,
+              }
+            : null,
           initialDelivery: null,
         },
       ];
@@ -1546,12 +1749,19 @@ export function updateOrder(input: UpdateOrderInput) {
   const belowDelivered = RETURN_QUANTITY_FIELDS.some(
     (item) => quantities[item.key] < delivered[item.key],
   );
+  const belowRequested = RETURN_QUANTITY_FIELDS.some(
+    (item) => quantities[item.key] < current.deliveryRequest[item.key],
+  );
 
   if (
     belowDelivered ||
     quantity < totalDeliveredQuantity(current.deliveries)
   ) {
     return "below_delivered" as const;
+  }
+
+  if (belowRequested) {
+    return "below_requested" as const;
   }
 
   const hasPartial = current.deliveries.length > 0;
@@ -1600,6 +1810,75 @@ export function updateOrder(input: UpdateOrderInput) {
   })();
 
   return "updated" as const;
+}
+
+export function updateOrderDeliveryRequest(
+  input: UpdateOrderDeliveryRequestInput,
+) {
+  const db = getDb();
+  const current = getOrder(input.orderId);
+
+  if (!current) {
+    return "missing" as const;
+  }
+
+  if (current.status === "WRITTEN_OFF" || current.status === "RETURNED") {
+    return "closed" as const;
+  }
+
+  const request = productValues(input);
+  const requestTotal = deliveryQuantityTotal(request);
+  const exceededLabels = RETURN_QUANTITY_FIELDS.filter(
+    (item) => request[item.key] > current[item.key],
+  ).map((item) => item.label);
+
+  if (exceededLabels.length > 0) {
+    return {
+      status: "exceeds" as const,
+      labels: exceededLabels,
+    };
+  }
+
+  const hasRequest = requestTotal > 0 || Boolean(input.note.trim());
+  const now = nowIso();
+
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE orders
+      SET request_suit_quantity = @suitQuantity,
+          request_jacket_quantity = @jacketQuantity,
+          request_pant_quantity = @pantQuantity,
+          request_vest_quantity = @vestQuantity,
+          request_coat_quantity = @coatQuantity,
+          delivery_request_date = @requestedAt,
+          delivery_request_note = @note,
+          delivery_request_updated_at = @requestUpdatedAt,
+          updated_at = @updatedAt
+      WHERE id = @orderId
+    `).run({
+      orderId: input.orderId,
+      ...request,
+      requestedAt: hasRequest ? input.requestedAt : null,
+      note: hasRequest ? input.note || null : null,
+      requestUpdatedAt: hasRequest ? now : null,
+      updatedAt: now,
+    });
+    insertEvent(
+      db,
+      input.orderId,
+      hasRequest ? "DELIVERY_REQUEST_UPDATED" : "DELIVERY_REQUEST_CLEARED",
+      hasRequest
+        ? `客户要求先交 ${input.requestedAt}：${[
+            deliverySummary(request),
+            input.note,
+          ]
+            .filter(Boolean)
+            .join("；")}`
+        : "清除客户先交要求",
+    );
+  })();
+
+  return hasRequest ? ("updated" as const) : ("cleared" as const);
 }
 
 export function addOrderDelivery(input: AddOrderDeliveryInput) {
@@ -1661,7 +1940,7 @@ export function addOrderDelivery(input: AddOrderDeliveryInput) {
       db,
       input.orderId,
       "FIRST_DELIVERY",
-      `先交 ${input.deliveredAt}：${deliverySummary(delivery)}${
+      `实际交货 ${input.deliveredAt}：${deliverySummary(delivery)}${
         input.note ? `；${input.note}` : ""
       }`,
     );
@@ -1718,7 +1997,7 @@ export function removeOrderDelivery(orderId: string, deliveryId: string) {
       db,
       orderId,
       "FIRST_DELIVERY_REMOVED",
-      `撤销先交 ${delivery.deliveredAt}：${deliverySummary(delivery)}`,
+      `撤销实际交货 ${delivery.deliveredAt}：${deliverySummary(delivery)}`,
     );
   })();
 

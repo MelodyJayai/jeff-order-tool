@@ -1,7 +1,7 @@
 services:
   jeff-order-tool:
     build: .
-    image: jeff-order-tool:0.1.22
+    image: jeff-order-tool:0.1.23
     container_name: jeff-order-tool
     restart: unless-stopped
     env_file:
