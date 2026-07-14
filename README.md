@@ -180,6 +180,7 @@ Jeff 现在需要多设备随时访问和编辑同一份订单数据时，建议
 ```text
 docs/cloud-deployment.zh.md
 docs/multi-cloud-deployment.zh.md
+docs/windows-cloud-trial.zh.md
 ```
 
 核心命令：
@@ -194,6 +195,14 @@ npm run start:cloud
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\cloud\windows\setup-cloud-desktop.ps1
 ```
+
+如果云桌面没有公网 IP，可用已打包版本和临时 HTTPS 隧道部署隔离试用实例：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\cloud\windows\trial\install-trial.ps1
+```
+
+该方式只用于短期体验；临时地址可能在服务器或隧道重启后变化，正式使用应换为固定域名和正式隧道或香港云服务器。
 
 正式云服务器或多云部署可以优先使用 GHCR 镜像：
 

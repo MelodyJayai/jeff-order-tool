@@ -79,6 +79,12 @@ npm run migrate:cloud-data -- --from "D:\tools\JeffOrderTool-v0.1.8\JeffOrderToo
 
 ## 4. 天翼云桌面 Windows 试运行
 
+如果云桌面没有公网 IP，并且本地已有完整发布包，优先使用不开放入站端口的试用方案：
+
+```text
+docs/windows-cloud-trial.zh.md
+```
+
 在云桌面中安装 Node.js LTS 和 Git 后，进入项目目录：
 
 推荐优先使用一键部署脚本：
