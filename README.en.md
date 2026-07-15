@@ -370,6 +370,12 @@ NEXT_PUBLIC_SITE_URL=
 JEFF_COOKIE_SECURE=false
 ```
 
+## Cloud Data Migration
+
+Cloud deployments expose an authenticated `/migration` workbench. It validates an uploaded SQLite backup, shows source/cloud counts and per-order differences, and then offers either a full replacement or a safe merge keyed by company and order code. The merge automatically handles one-sided changes and requires an explicit choice for every true conflict.
+
+Each migration locks writes, creates a consistent pre-migration backup, verifies that cloud data has not changed since preview, preserves order IDs, timestamps, deliveries, and event history, and runs `PRAGMA integrity_check` afterward. Failures are restored automatically; the latest successful migration can also be rolled back after another safety backup is created. See `docs/cloud-data-migration.zh.md` for the cutover procedure.
+
 ## Build And Check
 
 ```bash
@@ -378,6 +384,7 @@ npm run build
 npm run build:desktop
 npm run package:desktop
 npm run package:installer
+npm run test:cloud-migration
 ```
 
 Send users the clean `.7z` file from `release-archives`. Do not directly zip a locally tested `release/JeffOrderTool` folder, because local test runs create `data` and password files.

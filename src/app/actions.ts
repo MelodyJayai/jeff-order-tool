@@ -35,6 +35,7 @@ import {
   URGENCY_LEVELS,
   urgencyLabels,
 } from "@/lib/types";
+import { getMigrationMaintenance } from "@/lib/maintenance";
 import { checkForUpdates } from "@/lib/update";
 
 const urgencySchema = z.enum(URGENCY_LEVELS);
@@ -157,6 +158,17 @@ function splitCodes(value: string) {
 
 function result(ok: boolean, message: string, skipped?: string[]): ActionResult {
   return { ok, message, skipped };
+}
+
+async function mutationBlockedResult() {
+  if (!(await ensureActionAuthenticated())) {
+    return result(false, "请先登录后再操作");
+  }
+
+  const maintenance = getMigrationMaintenance();
+  return maintenance
+    ? result(false, `云端数据库正在维护：${maintenance.reason}，请稍后再操作`)
+    : null;
 }
 
 function parseCsv(textValue: string) {
@@ -416,9 +428,8 @@ function csvImportRows(csvText: string): ImportOrderInput[] {
 export async function createOrdersAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  if (!(await ensureActionAuthenticated())) {
-    return result(false, "请先登录后再操作");
-  }
+  const blocked = await mutationBlockedResult();
+  if (blocked) return blocked;
 
   const codes = splitCodes(text(formData, "codes"));
 
@@ -495,9 +506,8 @@ export async function createOrdersAction(
 export async function updateOrderAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  if (!(await ensureActionAuthenticated())) {
-    return result(false, "请先登录后再操作");
-  }
+  const blocked = await mutationBlockedResult();
+  if (blocked) return blocked;
 
   const id = text(formData, "id");
 
@@ -540,9 +550,8 @@ export async function updateOrderAction(
 export async function updateOrderDeliveryRequestAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  if (!(await ensureActionAuthenticated())) {
-    return result(false, "请先登录后再操作");
-  }
+  const blocked = await mutationBlockedResult();
+  if (blocked) return blocked;
 
   const orderId = text(formData, "orderId");
 
@@ -591,9 +600,8 @@ export async function updateOrderDeliveryRequestAction(
 export async function addOrderDeliveryAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  if (!(await ensureActionAuthenticated())) {
-    return result(false, "请先登录后再操作");
-  }
+  const blocked = await mutationBlockedResult();
+  if (blocked) return blocked;
 
   const orderId = text(formData, "orderId");
 
@@ -644,9 +652,8 @@ export async function addOrderDeliveryAction(
 export async function removeOrderDeliveryAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  if (!(await ensureActionAuthenticated())) {
-    return result(false, "请先登录后再操作");
-  }
+  const blocked = await mutationBlockedResult();
+  if (blocked) return blocked;
 
   const orderId = text(formData, "orderId");
   const deliveryId = text(formData, "deliveryId");
@@ -678,9 +685,8 @@ export async function removeOrderDeliveryAction(
 export async function writeOffOrderAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  if (!(await ensureActionAuthenticated())) {
-    return result(false, "请先登录后再操作");
-  }
+  const blocked = await mutationBlockedResult();
+  if (blocked) return blocked;
 
   const id = text(formData, "id");
   const writtenOffAt = cleanDate(text(formData, "writtenOffAt"), chinaToday());
@@ -711,9 +717,8 @@ export async function writeOffOrderAction(
 export async function undoWriteOffOrderAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  if (!(await ensureActionAuthenticated())) {
-    return result(false, "请先登录后再操作");
-  }
+  const blocked = await mutationBlockedResult();
+  if (blocked) return blocked;
 
   const id = text(formData, "id");
 
@@ -730,9 +735,8 @@ export async function undoWriteOffOrderAction(
 export async function markReturnedOrderAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  if (!(await ensureActionAuthenticated())) {
-    return result(false, "请先登录后再操作");
-  }
+  const blocked = await mutationBlockedResult();
+  if (blocked) return blocked;
 
   const id = text(formData, "id");
 
@@ -817,9 +821,8 @@ async function downloadUpdateInstaller(
 }
 
 export async function installUpdateAction(): Promise<ActionResult> {
-  if (!(await ensureActionAuthenticated())) {
-    return result(false, "请先登录后再操作");
-  }
+  const blocked = await mutationBlockedResult();
+  if (blocked) return blocked;
 
   if (areInAppUpdatesDisabled()) {
     return result(false, "云端版本由服务器统一维护更新，不在网页内安装 Windows 更新包");
@@ -883,9 +886,8 @@ export async function installUpdateAction(): Promise<ActionResult> {
 export async function importCsvAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  if (!(await ensureActionAuthenticated())) {
-    return result(false, "请先登录后再操作");
-  }
+  const blocked = await mutationBlockedResult();
+  if (blocked) return blocked;
 
   const file = formData.get("csvFile");
 
@@ -924,9 +926,8 @@ export async function importCsvAction(
 export async function importSqliteBackupAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  if (!(await ensureActionAuthenticated())) {
-    return result(false, "请先登录后再操作");
-  }
+  const blocked = await mutationBlockedResult();
+  if (blocked) return blocked;
 
   const file = formData.get("dbFile");
 

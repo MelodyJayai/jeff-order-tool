@@ -536,7 +536,7 @@ function getMeta(db: Database.Database, key: string) {
   return row?.value ?? null;
 }
 
-function ensureSchema(db: Database.Database) {
+export function ensureDatabaseSchema(db: Database.Database) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       name TEXT PRIMARY KEY,
@@ -750,7 +750,7 @@ function ensureSchema(db: Database.Database) {
 
 function getDb() {
   if (globalForDb.__jeffOrderDb) {
-    ensureSchema(globalForDb.__jeffOrderDb);
+    ensureDatabaseSchema(globalForDb.__jeffOrderDb);
     return globalForDb.__jeffOrderDb;
   }
 
@@ -759,7 +759,7 @@ function getDb() {
   const db = new Database(DB_PATH);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
-  ensureSchema(db);
+  ensureDatabaseSchema(db);
 
   globalForDb.__jeffOrderDb = db;
   return db;
@@ -925,6 +925,29 @@ export function getDatabasePath() {
 
 export function getDataDirectory() {
   return path.dirname(DB_PATH);
+}
+
+export function getBackupDirectory() {
+  return BACKUP_DIR;
+}
+
+export function closeDatabaseForMigration() {
+  const db = globalForDb.__jeffOrderDb;
+
+  if (!db) {
+    return;
+  }
+
+  try {
+    db.pragma("wal_checkpoint(TRUNCATE)");
+  } finally {
+    db.close();
+    delete globalForDb.__jeffOrderDb;
+  }
+}
+
+export function reopenDatabaseAfterMigration() {
+  getDb();
 }
 
 export function getOrCreateSessionSecret() {

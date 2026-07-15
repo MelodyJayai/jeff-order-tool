@@ -125,6 +125,13 @@ if (Test-Path $publicDir) {
   Copy-Directory $publicDir (Join-Path $serverDir "public")
 }
 
+$serverScriptsDir = Join-Path $serverDir "scripts"
+New-Item -ItemType Directory -Force -Path $serverScriptsDir | Out-Null
+Copy-Item `
+  -LiteralPath (Join-Path $root "scripts\backup-sqlite.cjs") `
+  -Destination (Join-Path $serverScriptsDir "backup-sqlite.cjs") `
+  -Force
+
 $nodeExe = Join-Path (Split-Path (Get-Command node).Source) "node.exe"
 Copy-Item -LiteralPath $nodeExe -Destination (Join-Path $runtimeDir "node.exe") -Force
 

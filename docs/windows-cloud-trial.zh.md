@@ -9,7 +9,7 @@
 默认安装到 `D:\JeffOrderToolCloudTrial`：
 
 ```text
-app/                    v0.1.23 独立发布包
+app/                    v0.1.24 独立发布包
 config/trial.env        管理员密码，仅 SYSTEM/Administrators 可读
 data/orders.db          试用数据库
 data/backups/           每日 SQLite 一致性备份
@@ -70,7 +70,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File D:\JeffOrderToolCloudTrial\s
 - Server 和 Tunnel 任务为 `Running`。
 - DailyBackup 任务每天 `02:30` 运行。
 
-## 4. 任务与恢复
+## 4. 保留数据升级程序
+
+先生成新的独立发布包，再运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\cloud\windows\trial\update-trial.ps1 `
+  -PackageDir .\release\JeffOrderTool
+```
+
+升级脚本会先生成 SQLite 一致性备份，把新程序复制到暂存目录，短暂停止应用任务并切换程序目录，然后等待新版本 `/api/health` 通过。外部 `data`、`config`、日志、隧道和计划任务不会被覆盖；新程序启动失败时会自动恢复旧程序。旧程序包保留在安装根目录的 `app-retained-*` 目录中。
+
+## 5. 任务与恢复
 
 计划任务名称：
 
@@ -84,7 +95,7 @@ JeffOrderToolCloudTrialDailyBackup
 
 不需要创建 Windows 防火墙入站规则。应用固定监听 `127.0.0.1:3210`，外部设备不能绕过 HTTPS 隧道直接连接应用端口。
 
-## 5. 数据与备份
+## 6. 数据与备份
 
 每日备份目录：
 
@@ -94,9 +105,9 @@ D:\JeffOrderToolCloudTrial\data\backups
 
 备份脚本使用 SQLite Backup API 生成一致性 `.db` 文件，默认保留 30 天。正式使用前还需要把备份同步到另一台机器或对象存储，避免云桌面磁盘本身损坏时同时丢失数据库和本机备份。
 
-试用期不要在离线版和云端版同时修改同一张真实订单。推荐先使用带 `试用` 标识的测试订单；准备正式切换时，让 Jeff 停止离线录入，取得最新 `.db` 备份后做一次迁移和核对，再把云端设为唯一数据源。
+`0.1.24` 起云端提供带预检、差异预览、冲突选择和回滚的迁移工作台。试用期仍建议先使用带 `试用` 标识的测试订单；正式切换时按 `docs/cloud-data-migration.zh.md` 取得最新一致性 `.db` 备份，完成最终合并和抽查，再把云端设为唯一数据源。
 
-## 6. 试用边界
+## 7. 试用边界
 
 Cloudflare Quick Tunnel 适合这次验证，但存在以下限制：
 

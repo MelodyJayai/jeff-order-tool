@@ -1217,9 +1217,11 @@ function PhoneAccessCard({ access }: { access: PhoneAccess }) {
 
 function ImportBackupCard({
   busy,
+  cloudMode,
   onSubmit,
 }: {
   busy: string | null;
+  cloudMode: boolean;
   onSubmit: SubmitHandler;
 }) {
   return (
@@ -1259,34 +1261,45 @@ function ImportBackupCard({
             {busy === "导入" ? "导入中" : "导入订单"}
           </button>
         </form>
-        <form
-          onSubmit={(event) =>
-            onSubmit(event, importSqliteBackupAction, "导入旧库", true)
-          }
-          className="grid gap-2 border-t border-zinc-100 pt-3"
-        >
-          <Field label="导入旧版 .db 备份">
-            <input
-              name="dbFile"
-              type="file"
-              accept=".db,application/octet-stream,application/x-sqlite3"
-              className="block w-full text-sm text-zinc-700 file:mr-3 file:h-9 file:rounded-md file:border-0 file:bg-zinc-950 file:px-3 file:text-sm file:font-medium file:text-white"
-              required
-            />
-          </Field>
-          <button
-            type="submit"
-            disabled={Boolean(busy)}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-medium text-zinc-900 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
-            title="导入旧版数据库备份"
+        {cloudMode ? (
+          <a
+            href="/migration"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-medium text-zinc-900 transition hover:bg-zinc-50"
           >
             <Upload className="h-4 w-4" aria-hidden="true" />
-            {busy === "导入旧库" ? "导入中" : "导入旧版 .db"}
-          </button>
-          <div className="text-xs leading-5 text-zinc-500">
-            用于导入旧绿色版或备份目录里的 `jeff-order-*.db`，导入前会自动备份当前数据。
-          </div>
-        </form>
+            云端数据迁移
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </a>
+        ) : (
+          <form
+            onSubmit={(event) =>
+              onSubmit(event, importSqliteBackupAction, "导入旧库", true)
+            }
+            className="grid gap-2 border-t border-zinc-100 pt-3"
+          >
+            <Field label="导入旧版 .db 备份">
+              <input
+                name="dbFile"
+                type="file"
+                accept=".db,application/octet-stream,application/x-sqlite3"
+                className="block w-full text-sm text-zinc-700 file:mr-3 file:h-9 file:rounded-md file:border-0 file:bg-zinc-950 file:px-3 file:text-sm file:font-medium file:text-white"
+                required
+              />
+            </Field>
+            <button
+              type="submit"
+              disabled={Boolean(busy)}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-medium text-zinc-900 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+              title="导入旧版数据库备份"
+            >
+              <Upload className="h-4 w-4" aria-hidden="true" />
+              {busy === "导入旧库" ? "导入中" : "导入旧版 .db"}
+            </button>
+            <div className="text-xs leading-5 text-zinc-500">
+              用于导入旧绿色版或备份目录里的 `jeff-order-*.db`，导入前会自动备份当前数据。
+            </div>
+          </form>
+        )}
       </div>
     </section>
   );
@@ -2395,7 +2408,11 @@ export function Workbench({
             {!isPhoneMode ? <PhoneAccessCard access={phoneAccess} /> : null}
 
             {!isPhoneMode ? (
-              <ImportBackupCard busy={busy} onSubmit={submit} />
+              <ImportBackupCard
+                busy={busy}
+                cloudMode={cloudMode}
+                onSubmit={submit}
+              />
             ) : null}
 
             {!isPhoneMode && !cloudMode ? (

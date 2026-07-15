@@ -366,7 +366,9 @@ data/backups
 - 数据库会记录 `schema_version` 和 `schema_migrations`，后续版本可以识别旧数据并自动升级。
 - 安装版更新只替换程序文件，`data` 目录继续保留，可作为未来云端迁移来源。
 
-将来迁移云端时，优先复制完整 `data` 目录，再由迁移脚本导入云端数据库。
+云端模式提供受登录保护的 `/migration` 数据迁移工作台。上传软件生成的一致性 `.db` 备份后，系统会先检查完整性、结构版本、SHA-256、订单和交货记录数量，再提供完整替换或按“公司 + 订单号”安全合并。迁移前自动备份，冲突订单必须逐项选择，失败自动恢复，最近一次迁移也可手动回滚。
+
+云端服务器不能直接扫描 Jeff 的电脑；正式切换前仍需在本地软件中下载最新数据库备份并显式上传。完整步骤见 `docs/cloud-data-migration.zh.md`。
 
 导出 PostgreSQL 导入 SQL：
 
@@ -388,6 +390,7 @@ npm run build
 npm run build:desktop
 npm run package:desktop
 npm run backup:daily
+npm run test:cloud-migration
 ```
 
 ## 许可证
