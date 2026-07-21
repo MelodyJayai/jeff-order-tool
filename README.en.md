@@ -251,7 +251,7 @@ Output:
 release-installers/JeffOrderToolSetup-vVERSION.exe
 ```
 
-For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.23.exe`. It separates customer early-delivery requests from actual deliveries. Saving a request does not change shipment status or remaining quantities; confirming an actual delivery updates cumulative delivered and remaining quantities after an explicit confirmation prompt.
+For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.25.exe`. It keeps customer early-delivery requests separate from actual deliveries, supports safe local-to-cloud database merging, and adds the new customer `Mike Tailor` to the company selector.
 
 The installer defaults to the current Windows user's local app directory:
 

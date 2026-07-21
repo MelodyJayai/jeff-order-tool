@@ -5,6 +5,7 @@ export const COMPANY_OPTIONS = [
   "King's Tailor",
   "L & K Custom Tailor",
   "Manning Company",
+  "Mike Tailor",
   "New Sara",
   "New Super Fit Fashions",
   "Pacific Fashions",

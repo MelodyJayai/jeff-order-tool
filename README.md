@@ -269,7 +269,7 @@ npm run package:installer
 release-installers/JeffOrderToolSetup-v版本号.exe
 ```
 
-当前建议给 Jeff 发送 `release-installers/JeffOrderToolSetup-v0.1.23.exe`。该版本把“客户要求先交”和“实际已经交货”拆成两套独立数据与操作：保存客户要求不会扣减剩余数量，确认实际交货才会更新累计已交和剩余未交，并在提交前二次确认。
+当前建议给 Jeff 发送 `release-installers/JeffOrderToolSetup-v0.1.25.exe`。该版本保留“客户要求先交”和“实际已经交货”两套独立数据与操作，支持安全合并本地与云端数据库，并在公司下拉框中加入新客户 `Mike Tailor`。
 
 安装包默认安装到当前 Windows 用户目录：
 

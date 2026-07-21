@@ -9,7 +9,7 @@
 默认安装到 `D:\JeffOrderToolCloudTrial`：
 
 ```text
-app/                    v0.1.24 独立发布包
+app/                    v0.1.25 独立发布包
 config/trial.env        管理员密码，仅 SYSTEM/Administrators 可读
 data/orders.db          试用数据库
 data/backups/           每日 SQLite 一致性备份
