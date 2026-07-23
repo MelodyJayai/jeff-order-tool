@@ -83,6 +83,7 @@ NEXT_PUBLIC_SITE_URL=https://orders.example.com
 JEFF_COOKIE_SECURE=true
 JEFF_DEPLOYMENT_MODE=cloud
 JEFF_DISABLE_IN_APP_UPDATES=true
+JEFF_ENABLE_RETURN_WORKFLOW=false
 JEFF_ORDER_DB_PATH=/app/data/orders.db
 JEFF_BACKUP_DIR=/app/data/backups
 JEFF_BACKUP_RETENTION_DAYS=30
@@ -102,7 +103,7 @@ JEFF_BACKUP_DIR=D:\JeffOrderToolCloud\data\backups
 
 ```text
 ghcr.io/melodyjayai/jeff-order-tool:latest
-ghcr.io/melodyjayai/jeff-order-tool:0.1.25
+ghcr.io/melodyjayai/jeff-order-tool:0.1.26
 ```
 
 服务器上不需要构建源码时，可以使用：

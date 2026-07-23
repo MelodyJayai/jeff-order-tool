@@ -70,6 +70,7 @@ setDefault("PORT", "3000");
 setDefault("HOSTNAME", "0.0.0.0");
 setDefault("JEFF_DEPLOYMENT_MODE", "cloud");
 setDefault("JEFF_DISABLE_IN_APP_UPDATES", "true");
+setDefault("JEFF_ENABLE_RETURN_WORKFLOW", "false");
 setDefault("JEFF_ORDER_DB_PATH", path.join(dataDir, "orders.db"));
 setDefault("JEFF_BACKUP_DIR", path.join(dataDir, "backups"));
 

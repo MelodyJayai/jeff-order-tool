@@ -24,6 +24,7 @@ ENV NODE_ENV=production \
   PORT=3000 \
   JEFF_DEPLOYMENT_MODE=cloud \
   JEFF_DISABLE_IN_APP_UPDATES=true \
+  JEFF_ENABLE_RETURN_WORKFLOW=false \
   JEFF_ORDER_DB_PATH=/app/data/orders.db \
   JEFF_BACKUP_DIR=/app/data/backups
 

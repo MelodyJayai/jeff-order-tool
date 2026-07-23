@@ -1,6 +1,6 @@
 {
   "name": "jeff-order-tool",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "scripts": {
     "dev": "next dev",
     "dev:lan": "next dev --hostname 0.0.0.0",

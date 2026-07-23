@@ -8,3 +8,9 @@ export function areInAppUpdatesDisabled() {
     process.env.JEFF_DISABLE_IN_APP_UPDATES?.trim().toLowerCase() === "true"
   );
 }
+
+export function isReturnWorkflowEnabled() {
+  return (
+    process.env.JEFF_ENABLE_RETURN_WORKFLOW?.trim().toLowerCase() === "true"
+  );
+}

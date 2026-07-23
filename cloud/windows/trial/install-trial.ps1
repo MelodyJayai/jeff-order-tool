@@ -104,7 +104,8 @@ $adminPassword = New-TrialPassword
 $configLines = @(
   "JEFF_ADMIN_PASSWORD=$adminPassword",
   "JEFF_DEPLOYMENT_MODE=cloud",
-  "JEFF_DISABLE_IN_APP_UPDATES=true"
+  "JEFF_DISABLE_IN_APP_UPDATES=true",
+  "JEFF_ENABLE_RETURN_WORKFLOW=false"
 )
 Set-Content -LiteralPath $configPath -Value $configLines -Encoding utf8
 Set-AdminOnlyAcl $configPath

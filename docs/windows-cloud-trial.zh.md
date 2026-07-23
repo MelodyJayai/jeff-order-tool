@@ -9,7 +9,7 @@
 默认安装到 `D:\JeffOrderToolCloudTrial`：
 
 ```text
-app/                    v0.1.25 独立发布包
+app/                    v0.1.26 独立发布包
 config/trial.env        管理员密码，仅 SYSTEM/Administrators 可读
 data/orders.db          试用数据库
 data/backups/           每日 SQLite 一致性备份
@@ -18,6 +18,8 @@ scripts/                运维脚本
 tools/cloudflared.exe   固定版本且经过 SHA-256 校验的隧道程序
 public-url.txt          当前临时公网地址
 ```
+
+试用隧道默认使用 `HTTP/2`，以兼容会拦截 Cloudflare QUIC/UDP 连接的云桌面网络。确实需要改回自动协商时，可给 `run-trial-tunnel.ps1` 传入 `-Protocol auto`。
 
 云端数据与 Jeff 电脑里的离线数据完全分开，部署和试用不会覆盖离线数据库。
 

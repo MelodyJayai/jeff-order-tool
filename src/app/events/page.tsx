@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { formatDateTime } from "@/lib/date";
 import { requireAuthenticatedPage } from "@/lib/auth";
+import { isReturnWorkflowEnabled } from "@/lib/deployment";
 import { listOrderEvents } from "@/lib/db";
 import type { OrderEventType } from "@/lib/types";
 
@@ -39,7 +40,12 @@ const eventTone: Record<OrderEventType, string> = {
 export default async function EventsPage() {
   await requireAuthenticatedPage();
 
-  const events = listOrderEvents(500);
+  const returnWorkflowEnabled = isReturnWorkflowEnabled();
+  const events = listOrderEvents(500).filter(
+    (event) =>
+      returnWorkflowEnabled ||
+      (event.type !== "RETURNED" && event.type !== "RETURN_RESOLVED"),
+  );
 
   return (
     <main className="min-h-screen bg-zinc-100 text-zinc-950">

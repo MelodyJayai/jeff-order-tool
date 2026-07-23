@@ -64,6 +64,7 @@ type WorkbenchProps = {
   initialEvents: OrderEventRecord[];
   initialOrders: OrderRecord[];
   phoneAccess: PhoneAccess;
+  returnWorkflowEnabled: boolean;
   today: string;
 };
 
@@ -228,8 +229,18 @@ function usePhoneMode() {
   );
 }
 
-function writeOffLabel(status: OrderStatus) {
-  if (status === "RETURNED") {
+function visibleOrderStatus(
+  status: OrderStatus,
+  returnWorkflowEnabled: boolean,
+) {
+  return status === "RETURNED" && !returnWorkflowEnabled ? "PENDING" : status;
+}
+
+function writeOffLabel(
+  status: OrderStatus,
+  returnWorkflowEnabled: boolean,
+) {
+  if (status === "RETURNED" && returnWorkflowEnabled) {
     return "完成返厂";
   }
 
@@ -238,6 +249,15 @@ function writeOffLabel(status: OrderStatus) {
 
 function dateText(value: string | null) {
   return value || "-";
+}
+
+function writtenOffDateText(
+  order: OrderRecord,
+  returnWorkflowEnabled: boolean,
+) {
+  return order.status === "RETURNED" && !returnWorkflowEnabled
+    ? "-"
+    : dateText(order.writtenOffAt);
 }
 
 function blankText(value: string, fallback = "未选择") {
@@ -439,8 +459,11 @@ function sortByUrgency(a: OrderRecord, b: OrderRecord) {
   );
 }
 
-function orderTextTone(order: OrderRecord) {
-  if (order.status === "RETURNED") {
+function orderTextTone(
+  order: OrderRecord,
+  returnWorkflowEnabled: boolean,
+) {
+  if (order.status === "RETURNED" && returnWorkflowEnabled) {
     return "text-violet-700";
   }
 
@@ -459,8 +482,11 @@ function orderTextTone(order: OrderRecord) {
   return "text-zinc-950";
 }
 
-function orderSubTextTone(order: OrderRecord) {
-  if (order.status === "RETURNED") {
+function orderSubTextTone(
+  order: OrderRecord,
+  returnWorkflowEnabled: boolean,
+) {
+  if (order.status === "RETURNED" && returnWorkflowEnabled) {
     return "text-violet-600";
   }
 
@@ -833,12 +859,14 @@ function DeliverySection({
   editable,
   onSubmit,
   order,
+  returnWorkflowEnabled,
   today,
 }: {
   busy: string | null;
   editable: boolean;
   onSubmit: SubmitHandler;
   order: OrderRecord;
+  returnWorkflowEnabled: boolean;
   today: string;
 }) {
   const delivered = deliveryTotals(order);
@@ -973,7 +1001,11 @@ function DeliverySection({
         </div>
       ) : null}
       <DeliveryQuantityRow
-        label={order.status === "RETURNED" ? "返厂待再交" : "剩余未交"}
+        label={
+          order.status === "RETURNED" && returnWorkflowEnabled
+            ? "返厂待再交"
+            : "剩余未交"
+        }
         values={remaining}
         total={remainingTotal(order)}
         tone="blue"
@@ -1502,17 +1534,23 @@ function OrderRow({
   order,
   active,
   onSelect,
+  returnWorkflowEnabled,
 }: {
   order: OrderRecord;
   active: boolean;
   onSelect: () => void;
+  returnWorkflowEnabled: boolean;
 }) {
   const summary = productSummary(order);
-  const returnedSummary = returnSummary(order);
+  const returnedSummary = returnWorkflowEnabled ? returnSummary(order) : "";
   const delivered = deliveryTotals(order);
   const remaining = remainingQuantities(order);
-  const mainTone = orderTextTone(order);
-  const subTone = orderSubTextTone(order);
+  const displayedStatus = visibleOrderStatus(
+    order.status,
+    returnWorkflowEnabled,
+  );
+  const mainTone = orderTextTone(order, returnWorkflowEnabled);
+  const subTone = orderSubTextTone(order, returnWorkflowEnabled);
 
   return (
     <button
@@ -1534,8 +1572,8 @@ function OrderRow({
           </div>
         </div>
         <div className="flex shrink-0 gap-1">
-          <Badge className={statusTone[order.status]}>
-            {statusLabels[order.status]}
+          <Badge className={statusTone[displayedStatus]}>
+            {statusLabels[displayedStatus]}
           </Badge>
           {order.urgency !== "NORMAL" ? (
             <Badge className={urgencyTone[order.urgency]}>
@@ -1552,7 +1590,7 @@ function OrderRow({
       </div>
       <div className={cn("flex flex-wrap gap-x-4 gap-y-1 text-xs", subTone)}>
         <span>登记 {order.registeredAt}</span>
-        <span>出货 {dateText(order.writtenOffAt)}</span>
+        <span>出货 {writtenOffDateText(order, returnWorkflowEnabled)}</span>
         <span>数量 {orderQuantity(order)}</span>
         {order.deliveries.length > 0 ? (
           <span>
@@ -1564,7 +1602,8 @@ function OrderRow({
             客户要求 {quantitySummary(deliveryRequestQuantities(order)) || "见备注"}
           </span>
         ) : null}
-        {order.status !== "WRITTEN_OFF" && hasActualDelivery(order) ? (
+        {order.status !== "WRITTEN_OFF" &&
+        (hasActualDelivery(order) || order.status === "RETURNED") ? (
           <span>
             剩余 {quantitySummary(remaining) || remainingTotal(order)}（小计
             {remainingTotal(order)}）
@@ -1587,14 +1626,20 @@ function MobileDetail({
   today,
   busy,
   onSubmit,
+  returnWorkflowEnabled,
 }: {
   order: OrderRecord;
   today: string;
   busy: string | null;
   onSubmit: SubmitHandler;
+  returnWorkflowEnabled: boolean;
 }) {
   const summary = productSummary(order);
-  const returnedSummary = returnSummary(order);
+  const returnedSummary = returnWorkflowEnabled ? returnSummary(order) : "";
+  const displayedStatus = visibleOrderStatus(
+    order.status,
+    returnWorkflowEnabled,
+  );
 
   return (
     <div className="grid gap-4 p-4">
@@ -1603,8 +1648,8 @@ function MobileDetail({
           {order.code}
         </div>
         <div className="flex flex-wrap gap-1">
-          <Badge className={statusTone[order.status]}>
-            {statusLabels[order.status]}
+          <Badge className={statusTone[displayedStatus]}>
+            {statusLabels[displayedStatus]}
           </Badge>
           <Badge className={urgencyTone[order.urgency]}>
             {urgencyLabels[order.urgency]}
@@ -1638,10 +1683,10 @@ function MobileDetail({
         <div className="flex justify-between gap-3">
           <span className="text-zinc-500">出货日期</span>
           <span className="font-medium text-zinc-950">
-            {dateText(order.writtenOffAt)}
+            {writtenOffDateText(order, returnWorkflowEnabled)}
           </span>
         </div>
-        {order.returnedAt ? (
+        {returnWorkflowEnabled && order.returnedAt ? (
           <div className="flex justify-between gap-3">
             <span className="text-zinc-500">返厂日期</span>
             <span className="font-medium text-violet-700">
@@ -1700,11 +1745,12 @@ function MobileDetail({
           editable={false}
           onSubmit={onSubmit}
           order={order}
+          returnWorkflowEnabled={returnWorkflowEnabled}
           today={today}
         />
       ) : null}
 
-      {returnedSummary || order.returnNote ? (
+      {returnWorkflowEnabled && (returnedSummary || order.returnNote) ? (
         <div className="grid gap-2 rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
           {returnedSummary ? (
             <div>
@@ -1721,7 +1767,8 @@ function MobileDetail({
         </div>
       ) : null}
 
-      {order.status === "WRITTEN_OFF" || order.status === "RETURNED" ? (
+      {returnWorkflowEnabled &&
+      (order.status === "WRITTEN_OFF" || order.status === "RETURNED") ? (
         <ReturnOrderForm
           busy={busy}
           onSubmit={onSubmit}
@@ -1744,7 +1791,9 @@ function MobileDetail({
             title="出货核销"
           >
             <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-            {busy === "核销" ? "核销中" : writeOffLabel(order.status)}
+            {busy === "核销"
+              ? "核销中"
+              : writeOffLabel(order.status, returnWorkflowEnabled)}
           </button>
         </form>
       ) : null}
@@ -1757,6 +1806,7 @@ export function Workbench({
   initialEvents,
   initialOrders,
   phoneAccess,
+  returnWorkflowEnabled,
   today,
 }: WorkbenchProps) {
   const router = useRouter();
@@ -1907,7 +1957,10 @@ export function Workbench({
         if (statusFilter === "OPEN") {
           return order.status !== "WRITTEN_OFF";
         }
-        return order.status === statusFilter;
+        return (
+          visibleOrderStatus(order.status, returnWorkflowEnabled) ===
+          statusFilter
+        );
       })
       .filter((order) => {
         if (urgencyFilter === "ALL") {
@@ -1930,6 +1983,7 @@ export function Workbench({
     query,
     companyFilter,
     factoryFilter,
+    returnWorkflowEnabled,
     statusFilter,
     urgencyFilter,
     sortMode,
@@ -2182,6 +2236,7 @@ export function Workbench({
                     order={order}
                     active={order.id === selected?.id}
                     onSelect={() => setSelectedId(order.id)}
+                    returnWorkflowEnabled={returnWorkflowEnabled}
                   />
                 ))
               ) : (
@@ -2432,6 +2487,7 @@ export function Workbench({
                       order={order}
                       active={order.id === selected?.id}
                       onSelect={() => setSelectedId(order.id)}
+                      returnWorkflowEnabled={returnWorkflowEnabled}
                     />
                   ))
                 ) : (
@@ -2453,6 +2509,7 @@ export function Workbench({
                       order={order}
                       active={order.id === selected?.id}
                       onSelect={() => setSelectedId(order.id)}
+                      returnWorkflowEnabled={returnWorkflowEnabled}
                     />
                   ))
                 ) : (
@@ -2474,6 +2531,7 @@ export function Workbench({
                       order={order}
                       active={order.id === selected?.id}
                       onSelect={() => setSelectedId(order.id)}
+                      returnWorkflowEnabled={returnWorkflowEnabled}
                     />
                   ))
                 ) : (
@@ -2491,8 +2549,24 @@ export function Workbench({
                 <div className="text-sm font-semibold">订单详情</div>
                 {selected ? (
                   <div className="flex flex-wrap gap-1">
-                    <Badge className={statusTone[selected.status]}>
-                      {statusLabels[selected.status]}
+                    <Badge
+                      className={
+                        statusTone[
+                          visibleOrderStatus(
+                            selected.status,
+                            returnWorkflowEnabled,
+                          )
+                        ]
+                      }
+                    >
+                      {
+                        statusLabels[
+                          visibleOrderStatus(
+                            selected.status,
+                            returnWorkflowEnabled,
+                          )
+                        ]
+                      }
                     </Badge>
                     <Badge className={urgencyTone[selected.urgency]}>
                       {urgencyLabels[selected.urgency]}
@@ -2514,6 +2588,7 @@ export function Workbench({
                     today={today}
                     busy={busy}
                     onSubmit={submit}
+                    returnWorkflowEnabled={returnWorkflowEnabled}
                   />
                 ) : (
                 <div className="hidden gap-3 p-3 md:grid">
@@ -2523,8 +2598,14 @@ export function Workbench({
                     </div>
                     <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-500">
                       <span>登记 {selected.registeredAt}</span>
-                      <span>出货 {dateText(selected.writtenOffAt)}</span>
-                      {selected.returnedAt ? (
+                      <span>
+                        出货{" "}
+                        {writtenOffDateText(
+                          selected,
+                          returnWorkflowEnabled,
+                        )}
+                      </span>
+                      {returnWorkflowEnabled && selected.returnedAt ? (
                         <span>返厂 {selected.returnedAt}</span>
                       ) : null}
                       <span>数量 {orderQuantity(selected)}</span>
@@ -2634,11 +2715,13 @@ export function Workbench({
                     editable
                     onSubmit={submit}
                     order={selected}
+                    returnWorkflowEnabled={returnWorkflowEnabled}
                     today={today}
                   />
 
-                  {selected.status === "WRITTEN_OFF" ||
-                  selected.status === "RETURNED" ? (
+                  {returnWorkflowEnabled &&
+                  (selected.status === "WRITTEN_OFF" ||
+                    selected.status === "RETURNED") ? (
                     <ReturnOrderForm
                       busy={busy}
                       onSubmit={submit}
@@ -2657,7 +2740,8 @@ export function Workbench({
                       <input type="hidden" name="id" value={selected.id} />
                       <input type="hidden" name="writtenOffAt" value={today} />
                       <div className="text-sm text-zinc-600">
-                        {selected.status === "RETURNED"
+                        {selected.status === "RETURNED" &&
+                        returnWorkflowEnabled
                           ? "完成返厂日期自动记录"
                           : "出货日期自动记录"}{" "}
                         {today}
@@ -2669,13 +2753,19 @@ export function Workbench({
                         }
                         className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-300"
                         title={
-                          selected.status === "RETURNED" ? "完成返厂" : "出货核销"
+                          selected.status === "RETURNED" &&
+                          returnWorkflowEnabled
+                            ? "完成返厂"
+                            : "出货核销"
                         }
                       >
                         <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
                         {busy === "核销"
                           ? "核销中"
-                          : writeOffLabel(selected.status)}
+                          : writeOffLabel(
+                              selected.status,
+                              returnWorkflowEnabled,
+                            )}
                       </button>
                     </form>
                     <form
@@ -2751,7 +2841,10 @@ export function Workbench({
                   >
                     <option value="ALL">全部状态</option>
                     <option value="OPEN">未完成</option>
-                    {ORDER_STATUSES.map((status) => (
+                    {ORDER_STATUSES.filter(
+                      (status) =>
+                        returnWorkflowEnabled || status !== "RETURNED",
+                    ).map((status) => (
                       <option
                         key={status}
                         value={status}
@@ -2817,6 +2910,7 @@ export function Workbench({
                       order={order}
                       active={order.id === selected?.id}
                       onSelect={() => setSelectedId(order.id)}
+                      returnWorkflowEnabled={returnWorkflowEnabled}
                     />
                   ))
                 ) : (

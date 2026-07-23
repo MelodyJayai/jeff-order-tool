@@ -2027,7 +2027,11 @@ export function removeOrderDelivery(orderId: string, deliveryId: string) {
   return "removed" as const;
 }
 
-export function writeOffOrder(id: string, writtenOffAt: string) {
+export function writeOffOrder(
+  id: string,
+  writtenOffAt: string,
+  options: { replaceReturnedDate?: boolean } = {},
+) {
   const db = getDb();
   const current = getOrder(id);
 
@@ -2040,15 +2044,21 @@ export function writeOffOrder(id: string, writtenOffAt: string) {
   }
 
   const updated = db.transaction(() => {
+    const replaceWrittenOffDate =
+      options.replaceReturnedDate && current.status === "RETURNED" ? 1 : 0;
     const result = db.prepare(`
       UPDATE orders
       SET status = 'WRITTEN_OFF',
-          written_off_at = COALESCE(written_off_at, @writtenOffAt),
+          written_off_at = CASE
+            WHEN @replaceWrittenOffDate = 1 THEN @writtenOffAt
+            ELSE COALESCE(written_off_at, @writtenOffAt)
+          END,
           updated_at = @updatedAt
       WHERE id = @id
         AND status <> 'WRITTEN_OFF'
     `).run({
       id,
+      replaceWrittenOffDate,
       writtenOffAt,
       updatedAt: nowIso(),
     });

@@ -11,7 +11,10 @@ import { z } from "zod";
 import { calculateTotalQuantity, PRODUCT_COLUMNS } from "@/lib/catalog";
 import { ensureActionAuthenticated } from "@/lib/auth";
 import { chinaToday, cleanDate, optionalDate } from "@/lib/date";
-import { areInAppUpdatesDisabled } from "@/lib/deployment";
+import {
+  areInAppUpdatesDisabled,
+  isReturnWorkflowEnabled,
+} from "@/lib/deployment";
 import {
   addOrderDelivery,
   createDatabaseBackupFile,
@@ -695,7 +698,10 @@ export async function writeOffOrderAction(
     return result(false, "没有找到这条记录");
   }
 
-  const updated = writeOffOrder(id, writtenOffAt);
+  const returnWorkflowEnabled = isReturnWorkflowEnabled();
+  const updated = writeOffOrder(id, writtenOffAt, {
+    replaceReturnedDate: !returnWorkflowEnabled,
+  });
 
   revalidatePath("/");
 
@@ -704,7 +710,10 @@ export async function writeOffOrderAction(
   }
 
   if (updated === "resolved") {
-    return result(true, "返厂修改已完成");
+    return result(
+      true,
+      returnWorkflowEnabled ? "返厂修改已完成" : "已核销",
+    );
   }
 
   if (updated === "already") {
@@ -737,6 +746,13 @@ export async function markReturnedOrderAction(
 ): Promise<ActionResult> {
   const blocked = await mutationBlockedResult();
   if (blocked) return blocked;
+
+  if (!isReturnWorkflowEnabled()) {
+    return result(
+      false,
+      "返厂功能当前已停用；修改单请在原订单号后加“改”并登记为新订单",
+    );
+  }
 
   const id = text(formData, "id");
 

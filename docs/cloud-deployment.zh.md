@@ -36,6 +36,7 @@ NEXT_PUBLIC_SITE_URL=https://你的域名或Tailscale地址
 JEFF_COOKIE_SECURE=true
 JEFF_DEPLOYMENT_MODE=cloud
 JEFF_DISABLE_IN_APP_UPDATES=true
+JEFF_ENABLE_RETURN_WORKFLOW=false
 ```
 
 如果只是天翼云桌面内测，还没有 HTTPS，可以先用：

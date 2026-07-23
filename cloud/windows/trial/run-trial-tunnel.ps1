@@ -1,7 +1,9 @@
 param(
   [string]$InstallRoot = "D:\JeffOrderToolCloudTrial",
   [int]$Port = 3210,
-  [string]$ServerTaskName = "JeffOrderToolCloudTrialServer"
+  [string]$ServerTaskName = "JeffOrderToolCloudTrialServer",
+  [ValidateSet("auto", "http2", "quic")]
+  [string]$Protocol = "http2"
 )
 
 $ErrorActionPreference = "Stop"
@@ -48,12 +50,19 @@ Set-TextAtomically $currentLogsPath (@(
   "stdout=$stdoutLog",
   "stderr=$stderrLog"
 ) -join [Environment]::NewLine)
-"[$(Get-Date -Format o)] Starting Cloudflare Quick Tunnel for 127.0.0.1:$Port" |
+"[$(Get-Date -Format o)] Starting Cloudflare Quick Tunnel for 127.0.0.1:$Port with $Protocol" |
   Out-File -LiteralPath $wrapperLog -Encoding utf8 -Append
 
 $process = Start-Process `
   -FilePath $cloudflaredPath `
-  -ArgumentList @("tunnel", "--url", "http://127.0.0.1:$Port", "--no-autoupdate") `
+  -ArgumentList @(
+    "tunnel",
+    "--url",
+    "http://127.0.0.1:$Port",
+    "--protocol",
+    $Protocol,
+    "--no-autoupdate"
+  ) `
   -RedirectStandardOutput $stdoutLog `
   -RedirectStandardError $stderrLog `
   -WindowStyle Hidden `

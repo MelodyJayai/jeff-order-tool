@@ -1,7 +1,10 @@
 import { Workbench } from "@/app/components/workbench";
 import { requireAuthenticatedPage } from "@/lib/auth";
 import { chinaToday } from "@/lib/date";
-import { isCloudDeployment } from "@/lib/deployment";
+import {
+  isCloudDeployment,
+  isReturnWorkflowEnabled,
+} from "@/lib/deployment";
 import { ensureDailyDatabaseBackup, listOrderEvents, listOrders } from "@/lib/db";
 import { getLanAccessUrls } from "@/lib/network";
 import QRCode from "qrcode";
@@ -13,7 +16,12 @@ export default async function Home() {
   await ensureDailyDatabaseBackup();
 
   const orders = listOrders();
-  const events = listOrderEvents();
+  const returnWorkflowEnabled = isReturnWorkflowEnabled();
+  const events = listOrderEvents().filter(
+    (event) =>
+      returnWorkflowEnabled ||
+      (event.type !== "RETURNED" && event.type !== "RETURN_RESOLVED"),
+  );
   const urls = getLanAccessUrls();
   const primaryUrl = urls[0] ?? null;
   const qrDataUrl = primaryUrl
@@ -30,6 +38,7 @@ export default async function Home() {
       initialEvents={events}
       initialOrders={orders}
       phoneAccess={{ primaryUrl, qrDataUrl, urls }}
+      returnWorkflowEnabled={returnWorkflowEnabled}
       today={chinaToday()}
     />
   );

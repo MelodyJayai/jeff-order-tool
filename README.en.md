@@ -20,7 +20,7 @@ Many small workshops do not need a full ERP system. They need a practical tool t
 - Record one or more categorized early deliveries before final shipment.
 - Search an order number quickly.
 - Mark an order as shipped.
-- Mark returned-for-alteration items by product type after shipment.
+- Register alteration work as a new order by appending `改` to the original order number.
 - Automatically record registration and shipment dates.
 - Track each early-delivery date, categorized quantity, and note.
 - Keep urgent orders at the top.
@@ -50,7 +50,7 @@ If `JEFF_ADMIN_PASSWORD` is set, the app uses it and skips the first-setup page.
 - Automatic registration date.
 - Search by order number.
 - Shipment write-off with automatic shipment date.
-- Returned-for-alteration workflow after shipment, with quantities recorded by fine category.
+- Alteration-order workflow using `original order number + 改` as a separate order.
 - Separate customer early-delivery requests from actual delivery records.
 - Editable requested quantities that do not change shipment status or remaining quantities.
 - Repeatable actual delivery records with quantities for each product category and a confirmation guard.
@@ -69,17 +69,29 @@ If `JEFF_ADMIN_PASSWORD` is set, the app uses it and skips the first-setup page.
 - CSV export.
 - CSV import with order-number based update/insert.
 - Legacy SQLite `.db` backup import, useful when migrating from the old portable package to the installed version.
-- Operation log page for registration, delivery-request updates, actual delivery, delivery undo, write-off, returned alterations, returned-alteration completion, and undo.
+- Operation log page for registration, delivery-request updates, actual delivery, delivery undo, write-off, and undo.
 - Consistent SQLite backup download.
 - Login protection with first-run admin password setup.
 - Automatic backup before CSV import.
 - Daily backup helper and protected health page.
-- Mobile mode for search, viewing, urgent orders, shipment write-off, returned alterations, and returned-alteration completion.
+- Mobile mode for search, viewing, urgent orders, and shipment write-off.
 - Desktop-only registration and detail editing.
 - Local Wi-Fi phone access QR code.
 - SQLite storage with schema version metadata for future migration.
 - Windows green-package build for non-technical users.
 - Windows installer build and in-app update checks through GitHub Releases.
+
+## Alteration Orders And Legacy Return Compatibility
+
+For alteration work, register a separate order and append `改` to the original order number, for example `1234改`. This keeps the original order and the alteration order independent and easy to search.
+
+Starting with `0.1.26`, the legacy returned-alteration workflow is hidden and rejects new return records by default. Its database columns, historical records, imports, and migration support remain intact. Any unfinished legacy return record is shown as a normal pending order and can be completed with the standard shipment write-off action.
+
+To intentionally restore the legacy workflow, set:
+
+```text
+JEFF_ENABLE_RETURN_WORKFLOW=true
+```
 
 ## Data Model And Future Migration
 
@@ -94,7 +106,8 @@ The database is designed with future migration in mind:
 - Orders use stable internal IDs.
 - Order numbers are stored as searchable structured fields.
 - Dates are stored as text dates.
-- Company, factory, customer delivery requests, repeatable actual-delivery history, shipment status, returned-alteration quantities, urgency, and fine-category quantities are structured fields.
+- Company, factory, customer delivery requests, repeatable actual-delivery history, shipment status, urgency, and fine-category quantities are structured fields.
+- Legacy returned-alteration fields and history remain in the schema for backward compatibility and possible future re-enablement.
 - The database records `schema_version` and `schema_migrations`.
 
 Company and factory options are maintained in:
@@ -251,7 +264,7 @@ Output:
 release-installers/JeffOrderToolSetup-vVERSION.exe
 ```
 
-For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.25.exe`. It keeps customer early-delivery requests separate from actual deliveries, supports safe local-to-cloud database merging, and adds the new customer `Mike Tailor` to the company selector.
+For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.26.exe`. It hides and blocks the legacy return workflow by default, uses `original order number + 改` for alteration orders, preserves old return data, and lets unfinished legacy records complete through the normal write-off action.
 
 The installer defaults to the current Windows user's local app directory:
 

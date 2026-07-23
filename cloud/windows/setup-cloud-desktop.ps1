@@ -125,6 +125,7 @@ $logDir = Join-Path $resolvedDataDir "logs"
 
 $envLines = Set-EnvLine $envLines "JEFF_DEPLOYMENT_MODE" "cloud"
 $envLines = Set-EnvLine $envLines "JEFF_DISABLE_IN_APP_UPDATES" "true"
+$envLines = Set-EnvLine $envLines "JEFF_ENABLE_RETURN_WORKFLOW" "false"
 $envLines = Set-EnvLine $envLines "JEFF_ORDER_DB_PATH" $dbPath
 $envLines = Set-EnvLine $envLines "JEFF_BACKUP_DIR" $backupDir
 $envLines = Set-EnvLine $envLines "PORT" ([string]$Port)

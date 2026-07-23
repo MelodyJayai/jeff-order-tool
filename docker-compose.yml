@@ -1,7 +1,7 @@
 services:
   jeff-order-tool:
     build: .
-    image: jeff-order-tool:0.1.25
+    image: jeff-order-tool:0.1.26
     container_name: jeff-order-tool
     restart: unless-stopped
     env_file:
@@ -12,6 +12,7 @@ services:
       PORT: 3000
       JEFF_DEPLOYMENT_MODE: cloud
       JEFF_DISABLE_IN_APP_UPDATES: "true"
+      JEFF_ENABLE_RETURN_WORKFLOW: "false"
       JEFF_ORDER_DB_PATH: /app/data/orders.db
       JEFF_BACKUP_DIR: /app/data/backups
     ports:
