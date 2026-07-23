@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +9,7 @@ import {
   type ProductQuantityKey,
 } from "@/lib/catalog";
 import { chinaToday, cleanDate, nowIso, optionalDate } from "@/lib/date";
+import { scheduleLocalCloudSync } from "@/lib/local-sync-scheduler";
 import type {
   AddOrderDeliveryInput,
   CreateOrdersInput,
@@ -850,6 +851,7 @@ function insertEvent(
     detail: detail ?? null,
     createdAt: nowIso(),
   });
+  scheduleLocalCloudSync();
 }
 
 function toEventType(value: string): OrderEventType {
@@ -1104,6 +1106,23 @@ export function getDatabaseSummary() {
     schemaVersion: getMeta(db, "schema_version") ?? SCHEMA_VERSION,
     updatedAt: stat?.mtime.toISOString() ?? null,
   };
+}
+
+export function getDatabaseChangeToken() {
+  const db = getDb();
+  const orders = db
+    .prepare("SELECT id, updated_at FROM orders ORDER BY id")
+    .all();
+  const deliveries = db
+    .prepare("SELECT id, order_id, created_at FROM order_deliveries ORDER BY id")
+    .all();
+  const events = db
+    .prepare("SELECT id, order_id, created_at FROM order_events ORDER BY id")
+    .all();
+
+  return createHash("sha256")
+    .update(JSON.stringify({ orders, deliveries, events }), "utf8")
+    .digest("hex");
 }
 
 export async function createDatabaseBackup() {

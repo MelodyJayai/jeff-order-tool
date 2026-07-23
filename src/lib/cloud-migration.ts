@@ -598,6 +598,10 @@ export function getMigrationPreview(sessionId: string): MigrationPreview {
   return readSession(sessionId);
 }
 
+export function discardMigrationPreview(sessionId: string) {
+  removeSessionDirectory(sessionId);
+}
+
 function insertRecord(
   db: Database.Database,
   table: string,
@@ -996,6 +1000,12 @@ export function getMigrationReport(reportId: string) {
     return null;
   }
   return JSON.parse(fs.readFileSync(filePath, "utf8")) as MigrationReport;
+}
+
+export function findMigrationReportBySessionId(sessionId: string) {
+  return getRecentMigrationReports(100).find(
+    (report) => report.sessionId === sessionId,
+  ) ?? null;
 }
 
 export function getRecentMigrationReports(limit = 10) {

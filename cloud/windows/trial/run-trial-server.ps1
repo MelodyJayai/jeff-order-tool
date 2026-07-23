@@ -42,6 +42,7 @@ $env:HOSTNAME = "127.0.0.1"
 $env:PORT = [string]$Port
 $env:JEFF_DEPLOYMENT_MODE = "cloud"
 $env:JEFF_DISABLE_IN_APP_UPDATES = "true"
+$env:JEFF_CLOUD_SYNC_READ_ONLY = if ($env:JEFF_CLOUD_SYNC_READ_ONLY) { $env:JEFF_CLOUD_SYNC_READ_ONLY } else { "true" }
 $env:JEFF_ORDER_DB_PATH = Join-Path $root "data\orders.db"
 $env:JEFF_BACKUP_DIR = Join-Path $root "data\backups"
 $env:JEFF_BACKUP_RETENTION_DAYS = "30"

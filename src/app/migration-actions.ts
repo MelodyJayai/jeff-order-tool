@@ -12,6 +12,10 @@ import {
   type MigrationMode,
   type MigrationResolution,
 } from "@/lib/cloud-migration";
+import {
+  markCloudSyncAttemptApplied,
+  markCloudSyncAttemptRolledBack,
+} from "@/lib/cloud-sync-store";
 import { isCloudDeployment } from "@/lib/deployment";
 
 function formText(formData: FormData, key: string) {
@@ -90,6 +94,11 @@ export async function applyCloudMigrationAction(formData: FormData) {
     }
 
     const report = await applyMigration(sessionId, mode, resolutions);
+    markCloudSyncAttemptApplied(
+      sessionId,
+      report.id,
+      `管理员已完成安全合并：新增 ${report.created} 条，更新 ${report.updatedFromSource} 条`,
+    );
     revalidatePath("/");
     revalidatePath("/events");
     revalidatePath("/health");
@@ -112,6 +121,7 @@ export async function rollbackLatestMigrationAction(formData: FormData) {
   let rolledBackReportId = "";
   try {
     const report = await rollbackLatestMigration(reportId);
+    markCloudSyncAttemptRolledBack(reportId);
     revalidatePath("/");
     revalidatePath("/events");
     revalidatePath("/health");

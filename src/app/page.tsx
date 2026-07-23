@@ -3,9 +3,16 @@ import { requireAuthenticatedPage } from "@/lib/auth";
 import { chinaToday } from "@/lib/date";
 import {
   isCloudDeployment,
+  isCloudWriteProtected,
   isReturnWorkflowEnabled,
 } from "@/lib/deployment";
-import { ensureDailyDatabaseBackup, listOrderEvents, listOrders } from "@/lib/db";
+import {
+  ensureDailyDatabaseBackup,
+  getDatabaseChangeToken,
+  listOrderEvents,
+  listOrders,
+} from "@/lib/db";
+import { scheduleLocalCloudSync } from "@/lib/local-sync-scheduler";
 import { getLanAccessUrls } from "@/lib/network";
 import QRCode from "qrcode";
 
@@ -15,6 +22,7 @@ export default async function Home() {
   await requireAuthenticatedPage();
   await ensureDailyDatabaseBackup();
 
+  const cloudMode = isCloudDeployment();
   const orders = listOrders();
   const returnWorkflowEnabled = isReturnWorkflowEnabled();
   const events = listOrderEvents().filter(
@@ -32,14 +40,20 @@ export default async function Home() {
       })
     : null;
 
+  if (!cloudMode) {
+    scheduleLocalCloudSync(5_000);
+  }
+
   return (
     <Workbench
-      cloudMode={isCloudDeployment()}
+      cloudMode={cloudMode}
+      dataVersion={cloudMode ? "" : getDatabaseChangeToken()}
       initialEvents={events}
       initialOrders={orders}
       phoneAccess={{ primaryUrl, qrDataUrl, urls }}
       returnWorkflowEnabled={returnWorkflowEnabled}
       today={chinaToday()}
+      writeProtected={isCloudWriteProtected()}
     />
   );
 }

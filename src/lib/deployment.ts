@@ -14,3 +14,10 @@ export function isReturnWorkflowEnabled() {
     process.env.JEFF_ENABLE_RETURN_WORKFLOW?.trim().toLowerCase() === "true"
   );
 }
+
+export function isCloudWriteProtected() {
+  return (
+    isCloudDeployment() &&
+    process.env.JEFF_CLOUD_SYNC_READ_ONLY?.trim().toLowerCase() === "true"
+  );
+}

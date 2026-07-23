@@ -13,6 +13,7 @@ import { ensureActionAuthenticated } from "@/lib/auth";
 import { chinaToday, cleanDate, optionalDate } from "@/lib/date";
 import {
   areInAppUpdatesDisabled,
+  isCloudWriteProtected,
   isReturnWorkflowEnabled,
 } from "@/lib/deployment";
 import {
@@ -166,6 +167,13 @@ function result(ok: boolean, message: string, skipped?: string[]): ActionResult 
 async function mutationBlockedResult() {
   if (!(await ensureActionAuthenticated())) {
     return result(false, "请先登录后再操作");
+  }
+
+  if (isCloudWriteProtected()) {
+    return result(
+      false,
+      "当前是云端同步试用期，订单请在办公室电脑修改；云端暂时只供查询",
+    );
   }
 
   const maintenance = getMigrationMaintenance();

@@ -38,6 +38,7 @@ import {
   writeOffOrderAction,
 } from "@/app/actions";
 import { logoutAction } from "@/app/auth-actions";
+import { CloudSyncCard } from "@/app/components/cloud-sync-card";
 import {
   PRODUCT_COLUMNS,
   calculateTotalQuantity,
@@ -61,11 +62,13 @@ import {
 
 type WorkbenchProps = {
   cloudMode: boolean;
+  dataVersion: string;
   initialEvents: OrderEventRecord[];
   initialOrders: OrderRecord[];
   phoneAccess: PhoneAccess;
   returnWorkflowEnabled: boolean;
   today: string;
+  writeProtected: boolean;
 };
 
 type PhoneAccess = {
@@ -1294,14 +1297,24 @@ function ImportBackupCard({
           </button>
         </form>
         {cloudMode ? (
-          <a
-            href="/migration"
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-medium text-zinc-900 transition hover:bg-zinc-50"
-          >
-            <Upload className="h-4 w-4" aria-hidden="true" />
-            云端数据迁移
-            <ArrowRight className="h-4 w-4" aria-hidden="true" />
-          </a>
+          <div className="grid gap-2 border-t border-zinc-100 pt-3">
+            <a
+              href="/cloud-sync"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-medium text-zinc-900 transition hover:bg-zinc-50"
+            >
+              <Upload className="h-4 w-4" aria-hidden="true" />
+              离线版同步管理
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </a>
+            <a
+              href="/migration"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-medium text-zinc-900 transition hover:bg-zinc-50"
+            >
+              <Upload className="h-4 w-4" aria-hidden="true" />
+              手动数据迁移
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </a>
+          </div>
         ) : (
           <form
             onSubmit={(event) =>
@@ -1627,12 +1640,14 @@ function MobileDetail({
   busy,
   onSubmit,
   returnWorkflowEnabled,
+  writeProtected,
 }: {
   order: OrderRecord;
   today: string;
   busy: string | null;
   onSubmit: SubmitHandler;
   returnWorkflowEnabled: boolean;
+  writeProtected: boolean;
 }) {
   const summary = productSummary(order);
   const returnedSummary = returnWorkflowEnabled ? returnSummary(order) : "";
@@ -1767,7 +1782,8 @@ function MobileDetail({
         </div>
       ) : null}
 
-      {returnWorkflowEnabled &&
+      {!writeProtected &&
+      returnWorkflowEnabled &&
       (order.status === "WRITTEN_OFF" || order.status === "RETURNED") ? (
         <ReturnOrderForm
           busy={busy}
@@ -1777,7 +1793,7 @@ function MobileDetail({
         />
       ) : null}
 
-      {order.status !== "WRITTEN_OFF" ? (
+      {!writeProtected && order.status !== "WRITTEN_OFF" ? (
         <form
           onSubmit={(event) => onSubmit(event, writeOffOrderAction, "核销")}
           className="border-t border-emerald-100 pt-3"
@@ -1803,11 +1819,13 @@ function MobileDetail({
 
 export function Workbench({
   cloudMode,
+  dataVersion,
   initialEvents,
   initialOrders,
   phoneAccess,
   returnWorkflowEnabled,
   today,
+  writeProtected,
 }: WorkbenchProps) {
   const router = useRouter();
   const isPhoneMode = usePhoneMode();
@@ -2317,13 +2335,21 @@ export function Workbench({
 
         {isPhoneMode ? (
           <div className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-900">
-            手机模式：搜索订单，点“出货核销”；登记和修改在办公室电脑操作。
+            {writeProtected
+              ? "云端同步试用：手机当前只用于查订单，登记和核销仍在办公室电脑操作。"
+              : "手机模式：搜索订单，点“出货核销”；登记和修改在办公室电脑操作。"}
+          </div>
+        ) : null}
+
+        {writeProtected && !isPhoneMode ? (
+          <div className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-900">
+            云端同步试用：这里暂时只供查询，订单请继续在 Jeff 的办公室电脑登记和核销。
           </div>
         ) : null}
 
         <div className="grid gap-4 lg:grid-cols-[440px_minmax(0,1fr)] xl:grid-cols-[520px_minmax(0,1fr)]">
           <div className="grid content-start gap-4">
-            {!isPhoneMode ? (
+            {!isPhoneMode && !writeProtected ? (
               <section className="hidden rounded-md border border-zinc-200 bg-white md:block">
                 <div className="flex h-12 items-center justify-between border-b border-zinc-200 px-4">
                   <div className="flex items-center gap-2 text-sm font-semibold">
@@ -2462,6 +2488,10 @@ export function Workbench({
 
             {!isPhoneMode ? <PhoneAccessCard access={phoneAccess} /> : null}
 
+            {!isPhoneMode && !cloudMode ? (
+              <CloudSyncCard dataVersion={dataVersion} />
+            ) : null}
+
             {!isPhoneMode ? (
               <ImportBackupCard
                 busy={busy}
@@ -2589,6 +2619,7 @@ export function Workbench({
                     busy={busy}
                     onSubmit={submit}
                     returnWorkflowEnabled={returnWorkflowEnabled}
+                    writeProtected={writeProtected}
                   />
                 ) : (
                 <div className="hidden gap-3 p-3 md:grid">
@@ -2623,7 +2654,10 @@ export function Workbench({
                     onSubmit={(event) =>
                       submit(event, updateOrderAction, "保存")
                     }
-                    className="grid gap-2"
+                    className={cn(
+                      "grid gap-2",
+                      writeProtected && "pointer-events-none opacity-70",
+                    )}
                   >
                     <input type="hidden" name="id" value={selected.id} />
                     <input type="hidden" name="quantity" value={selected.quantity} />
@@ -2692,7 +2726,7 @@ export function Workbench({
                       </Field>
                       <button
                         type="submit"
-                        disabled={Boolean(busy)}
+                        disabled={Boolean(busy) || writeProtected}
                         className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-blue-600 bg-blue-600 px-4 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-blue-300 disabled:bg-blue-300"
                         title="保存登记更改"
                       >
@@ -2704,7 +2738,7 @@ export function Workbench({
 
                   <DeliveryRequestSection
                     busy={busy}
-                    editable
+                    editable={!writeProtected}
                     onSubmit={submit}
                     order={selected}
                     today={today}
@@ -2712,14 +2746,15 @@ export function Workbench({
 
                   <DeliverySection
                     busy={busy}
-                    editable
+                    editable={!writeProtected}
                     onSubmit={submit}
                     order={selected}
                     returnWorkflowEnabled={returnWorkflowEnabled}
                     today={today}
                   />
 
-                  {returnWorkflowEnabled &&
+                  {!writeProtected &&
+                  returnWorkflowEnabled &&
                   (selected.status === "WRITTEN_OFF" ||
                     selected.status === "RETURNED") ? (
                     <ReturnOrderForm
@@ -2749,7 +2784,9 @@ export function Workbench({
                       <button
                         type="submit"
                         disabled={
-                          Boolean(busy) || selected.status === "WRITTEN_OFF"
+                          Boolean(busy) ||
+                          writeProtected ||
+                          selected.status === "WRITTEN_OFF"
                         }
                         className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-300"
                         title={
@@ -2778,7 +2815,9 @@ export function Workbench({
                       <button
                         type="submit"
                         disabled={
-                          Boolean(busy) || selected.status !== "WRITTEN_OFF"
+                          Boolean(busy) ||
+                          writeProtected ||
+                          selected.status !== "WRITTEN_OFF"
                         }
                         className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-medium text-zinc-900 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
                         title="撤销核销"
