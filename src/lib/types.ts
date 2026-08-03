@@ -113,6 +113,7 @@ export type OrderEventRecord = {
 };
 
 export type CreateOrdersInput = {
+  submissionKey?: string;
   codes: string[];
   companyName: string;
   factoryName: string;
@@ -132,6 +133,7 @@ export type CreateOrdersInput = {
 };
 
 export type ImportOrderInput = CreateOrdersInput & {
+  sourceId?: string;
   code: string;
   status: OrderStatus;
   writtenOffAt: string | null;

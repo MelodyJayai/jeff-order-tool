@@ -372,6 +372,9 @@ function csvImportRows(csvText: string): ImportOrderInput[] {
 
     return [
       {
+        sourceId:
+          rowValue(row, ["记录ID", "订单记录ID", "record id", "order id"]) ||
+          undefined,
         code,
         codes: [code],
         companyName: rowValue(row, ["公司", "公司名称", "company", "company name"]),
@@ -472,7 +475,8 @@ export async function createOrdersAction(
     );
   }
 
-  const { created, skipped } = createOrders({
+  const { created, reused, alreadySubmitted } = createOrders({
+    submissionKey: text(formData, "submissionKey") || undefined,
     codes,
     companyName,
     factoryName: text(formData, "factoryName"),
@@ -498,14 +502,21 @@ export async function createOrdersAction(
 
   revalidatePath("/");
 
-  if (created === 0) {
-    return result(false, "这家公司下面的订单号已经在总表里", skipped);
+  if (alreadySubmitted) {
+    return result(true, "这次登记已经保存过，系统没有重复新增");
   }
 
-  if (skipped.length > 0) {
-    const savedText =
-      created === 1 ? "已保存到订单总表" : `已保存 ${created} 个订单号到订单总表`;
-    return result(true, `${savedText}，跳过 ${skipped.length} 个同公司重复订单号`, skipped);
+  if (reused.length > 0) {
+    if (created === 1 && reused.length === 1) {
+      return result(
+        true,
+        `已新增为独立订单；${reused[0].label} 现在共有 ${reused[0].total} 笔`,
+      );
+    }
+    return result(
+      true,
+      `已保存 ${created} 笔订单，其中 ${reused.length} 个订单号已有历史记录；本次均为独立新订单`,
+    );
   }
 
   return result(
@@ -541,10 +552,6 @@ export async function updateOrderAction(
 
   if (updated === "updated") {
     return result(true, "已保存");
-  }
-
-  if (updated === "duplicate") {
-    return result(false, "这家公司下面已经有相同订单号");
   }
 
   if (updated === "below_delivered") {

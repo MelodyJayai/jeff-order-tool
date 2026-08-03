@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { Workbench } from "@/app/components/workbench";
 import { requireAuthenticatedPage } from "@/lib/auth";
 import { chinaToday } from "@/lib/date";
@@ -48,6 +50,7 @@ export default async function Home() {
     <Workbench
       cloudMode={cloudMode}
       dataVersion={cloudMode ? "" : getDatabaseChangeToken()}
+      entrySubmissionKey={randomUUID()}
       initialEvents={events}
       initialOrders={orders}
       phoneAccess={{ primaryUrl, qrDataUrl, urls }}

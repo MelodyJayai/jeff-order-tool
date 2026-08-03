@@ -46,6 +46,7 @@ If `JEFF_ADMIN_PASSWORD` is set, the app uses it and skips the first-setup page.
 
 - One persistent order table, no monthly table splitting.
 - Manual order-number registration.
+- Reusable order numbers: the same company can register the same business number more than once while each record keeps independent dates, quantities, deliveries, and write-off status.
 - Company and factory selection fields; the redundant customer field is hidden.
 - Automatic registration date.
 - Search by order number.
@@ -67,7 +68,7 @@ If `JEFF_ADMIN_PASSWORD` is set, the app uses it and skips the first-setup page.
 - Compact desktop order details with clearly separated request and actual-delivery sections.
 - Order-number ascending sort by default, with registration-date sort options.
 - CSV export.
-- CSV import with order-number based update/insert.
+- CSV import keyed by stable record ID, with unambiguous legacy order-number fallback.
 - Legacy SQLite `.db` backup import, useful when migrating from the old portable package to the installed version.
 - Operation log page for registration, delivery-request updates, actual delivery, delivery undo, write-off, and undo.
 - Consistent SQLite backup download.
@@ -78,6 +79,8 @@ If `JEFF_ADMIN_PASSWORD` is set, the app uses it and skips the first-setup page.
 - Desktop-only registration and detail editing.
 - Local Wi-Fi phone access QR code.
 - SQLite storage with schema version metadata for future migration.
+
+After a database contains repeated order numbers under the same company, do not downgrade it to `0.1.27` or older. A rollback must also restore the database backup created before the upgrade.
 - Windows green-package build for non-technical users.
 - Windows installer build and in-app update checks through GitHub Releases.
 - One-time device pairing and protected local-to-cloud synchronization.
@@ -270,7 +273,7 @@ Output:
 release-installers/JeffOrderToolSetup-vVERSION.exe
 ```
 
-For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.27.exe`. It adds protected local-to-cloud synchronization, one-time device pairing, DPAPI credential storage, automatic conflict-free merge, and administrator review for true conflicts while retaining the `0.1.26` alteration-order behavior.
+For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.28.exe`. It allows repeated order numbers under the same company and consistently uses immutable record IDs for editing, delivery, write-off, import, and cloud synchronization. Ambiguous legacy matches stop instead of overwriting another order.
 
 The installer defaults to the current Windows user's local app directory:
 
@@ -391,7 +394,7 @@ JEFF_COOKIE_SECURE=false
 
 ## Cloud Data Migration
 
-Cloud deployments expose an authenticated `/migration` workbench. It validates an uploaded SQLite backup, shows source/cloud counts and per-order differences, and then offers either a full replacement or a safe merge keyed by company and order code. The merge automatically handles one-sided changes and requires an explicit choice for every true conflict.
+Cloud deployments expose an authenticated `/migration` workbench. It validates an uploaded SQLite backup, shows source/cloud counts and per-order differences, and then offers either a full replacement or a safe merge keyed by immutable order record ID. Legacy databases may fall back to company and order code only for a unique one-to-one match; ambiguous repeated numbers stop the merge. The merge automatically handles one-sided changes and requires an explicit choice for every true conflict.
 
 Each migration locks writes, creates a consistent pre-migration backup, verifies that cloud data has not changed since preview, preserves order IDs, timestamps, deliveries, and event history, and runs `PRAGMA integrity_check` afterward. Failures are restored automatically; the latest successful migration can also be rolled back after another safety backup is created. See `docs/cloud-data-migration.zh.md` for the cutover procedure.
 

@@ -95,6 +95,7 @@ type MigrationSession = MigrationPreview & {
 type OrderSnapshot = {
   id: string;
   key: string;
+  businessKey: string;
   code: string;
   companyName: string;
   updatedAt: string;
@@ -210,6 +211,10 @@ function normalizedKey(companyName: string, code: string) {
     .toLocaleLowerCase()}`;
 }
 
+function identityKey(id: string) {
+  return `id:${id}`;
+}
+
 function cleanRecord(row: Record<string, unknown>, ignored = new Set<string>()) {
   return Object.fromEntries(
     Object.keys(row)
@@ -264,7 +269,8 @@ function orderSnapshots(db: Database.Database) {
     const id = String(order.id ?? "");
     const code = String(order.code ?? "").trim();
     const companyName = String(order.company_name ?? "").trim();
-    const key = normalizedKey(companyName, code);
+    const key = identityKey(id);
+    const businessKey = normalizedKey(companyName, code);
     const hash = hashBuffer(
       JSON.stringify({
         order: cleanRecord(order, ORDER_HASH_IGNORED_COLUMNS),
@@ -276,6 +282,7 @@ function orderSnapshots(db: Database.Database) {
     snapshots.set(key, {
       id,
       key,
+      businessKey,
       code,
       companyName,
       updatedAt: String(order.updated_at ?? ""),
@@ -284,6 +291,62 @@ function orderSnapshots(db: Database.Database) {
   }
 
   return snapshots;
+}
+
+function groupSnapshotsByBusiness(snapshots: Map<string, OrderSnapshot>) {
+  const groups = new Map<string, OrderSnapshot[]>();
+  for (const snapshot of snapshots.values()) {
+    const existing = groups.get(snapshot.businessKey) ?? [];
+    existing.push(snapshot);
+    groups.set(snapshot.businessKey, existing);
+  }
+  return groups;
+}
+
+function alignSnapshotMaps(
+  sourceSnapshots: Map<string, OrderSnapshot>,
+  cloudSnapshots: Map<string, OrderSnapshot>,
+) {
+  const source = new Map(sourceSnapshots);
+  const cloud = new Map(cloudSnapshots);
+  const sourceGroups = groupSnapshotsByBusiness(sourceSnapshots);
+  const cloudGroups = groupSnapshotsByBusiness(cloudSnapshots);
+  const businessKeys = new Set([...sourceGroups.keys(), ...cloudGroups.keys()]);
+
+  for (const businessKey of businessKeys) {
+    const sourceGroup = sourceGroups.get(businessKey) ?? [];
+    const cloudGroup = cloudGroups.get(businessKey) ?? [];
+    const unmatchedSource = sourceGroup.filter(
+      (snapshot) => !cloudSnapshots.has(snapshot.key),
+    );
+    const unmatchedCloud = cloudGroup.filter(
+      (snapshot) => !sourceSnapshots.has(snapshot.key),
+    );
+
+    if (unmatchedSource.length === 0 || unmatchedCloud.length === 0) {
+      continue;
+    }
+
+    if (
+      sourceGroup.length === 1 &&
+      cloudGroup.length === 1 &&
+      unmatchedSource.length === 1 &&
+      unmatchedCloud.length === 1
+    ) {
+      const sourceSnapshot = unmatchedSource[0];
+      const cloudSnapshot = unmatchedCloud[0];
+      cloud.delete(cloudSnapshot.key);
+      cloud.set(sourceSnapshot.key, cloudSnapshot);
+      continue;
+    }
+
+    const sample = unmatchedSource[0] ?? unmatchedCloud[0]!;
+    throw new Error(
+      `同号订单无法安全对应：${sample.companyName || "未选公司"} / ${sample.code}。请勿继续自动合并，改用完整替换或人工核对。`,
+    );
+  }
+
+  return { source, cloud };
 }
 
 function databaseFingerprint(snapshots: Map<string, OrderSnapshot>) {
@@ -431,8 +494,14 @@ function classifyDifference(
 }
 
 function buildDiffs(sourceDb: Database.Database, cloudDb: Database.Database) {
-  const sourceSnapshots = orderSnapshots(sourceDb);
-  const cloudSnapshots = orderSnapshots(cloudDb);
+  const aligned = alignSnapshotMaps(
+    orderSnapshots(sourceDb),
+    orderSnapshots(cloudDb),
+  );
+  const sourceSnapshots = aligned.source;
+  const cloudSnapshots = aligned.cloud;
+  const sourceBusinessCounts = groupSnapshotsByBusiness(sourceSnapshots);
+  const cloudBusinessCounts = groupSnapshotsByBusiness(cloudSnapshots);
   const baselines = readBaselines(cloudDb);
   const keys = new Set([...sourceSnapshots.keys(), ...cloudSnapshots.keys()]);
   const counts = emptyCounts();
@@ -441,7 +510,16 @@ function buildDiffs(sourceDb: Database.Database, cloudDb: Database.Database) {
   for (const key of [...keys].sort()) {
     const source = sourceSnapshots.get(key);
     const cloud = cloudSnapshots.get(key);
-    const category = classifyDifference(source, cloud, baselines.get(key));
+    const businessKey = source?.businessKey ?? cloud?.businessKey ?? "";
+    const legacyBaselineIsUnambiguous =
+      (sourceBusinessCounts.get(businessKey)?.length ?? 0) <= 1 &&
+      (cloudBusinessCounts.get(businessKey)?.length ?? 0) <= 1;
+    const baseline =
+      baselines.get(key) ??
+      (legacyBaselineIsUnambiguous
+        ? baselines.get(businessKey)
+        : undefined);
+    const category = classifyDifference(source, cloud, baseline);
     counts[category] += 1;
     diffs.push({
       id: hashBuffer(key).slice(0, 20),
@@ -731,8 +809,12 @@ function saveBaselines(
   sourceDb: Database.Database,
   migrationId: string,
 ) {
-  const source = orderSnapshots(sourceDb);
-  const cloud = orderSnapshots(cloudDb);
+  const aligned = alignSnapshotMaps(
+    orderSnapshots(sourceDb),
+    orderSnapshots(cloudDb),
+  );
+  const source = aligned.source;
+  const cloud = aligned.cloud;
   const keys = new Set([...source.keys(), ...cloud.keys()]);
   const now = new Date().toISOString();
   const upsert = cloudDb.prepare(`
@@ -889,8 +971,8 @@ export async function applyMigration(
         cloud.pragma("foreign_keys = ON");
         ensureDatabaseSchema(cloud);
         ensureMigrationTables(cloud);
-        const sourceSnapshots = orderSnapshots(source);
-        const cloudSnapshots = orderSnapshots(cloud);
+        const sourceSnapshots = comparison.sourceSnapshots;
+        const cloudSnapshots = comparison.cloudSnapshots;
 
         cloud.transaction(() => {
           for (const diff of comparison.diffs) {

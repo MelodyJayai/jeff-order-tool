@@ -103,7 +103,7 @@ const DB_PATH = process.env.JEFF_ORDER_DB_PATH
 const BACKUP_DIR = process.env.JEFF_BACKUP_DIR
   ? path.resolve(process.env.JEFF_BACKUP_DIR)
   : path.join(path.dirname(DB_PATH), "backups");
-const SCHEMA_VERSION = "2026-07-14-v7-delivery-requests";
+const SCHEMA_VERSION = "2026-08-03-v8-reusable-order-codes";
 
 function productValues(input: Record<ProductQuantityKey, number>) {
   return {
@@ -498,18 +498,17 @@ function rebuildOrdersWithoutGlobalCodeUnique(db: Database.Database) {
 }
 
 function ensureOrderIndexes(db: Database.Database) {
+  db.exec("DROP INDEX IF EXISTS idx_orders_company_code_unique");
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_orders_code ON orders(code);
+    CREATE INDEX IF NOT EXISTS idx_orders_company_code
+      ON orders(lower(trim(ifnull(company_name, ''))), lower(trim(code)));
     CREATE INDEX IF NOT EXISTS idx_orders_status_urgency ON orders(status, urgency);
     CREATE INDEX IF NOT EXISTS idx_orders_registered_at ON orders(registered_at);
     CREATE INDEX IF NOT EXISTS idx_orders_written_off_at ON orders(written_off_at);
     CREATE INDEX IF NOT EXISTS idx_orders_company_factory ON orders(company_name, factory_name);
   `);
 
-  db.prepare(
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_company_code_unique
-     ON orders(lower(trim(ifnull(company_name, ''))), lower(trim(code)))`,
-  ).run();
 }
 
 function recordMigration(db: Database.Database, name: string) {
@@ -561,6 +560,11 @@ export function ensureDatabaseSchema(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_order_events_order_id ON order_events(order_id);
     CREATE INDEX IF NOT EXISTS idx_order_events_created_at ON order_events(created_at);
+
+    CREATE TABLE IF NOT EXISTS order_entry_submissions (
+      submission_key TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL
+    );
   `);
 
   const ordersTable = db
@@ -745,6 +749,7 @@ export function ensureDatabaseSchema(db: Database.Database) {
   recordMigration(db, "2026-06-08-v5-first-delivery");
   recordMigration(db, "2026-07-11-v6-order-deliveries");
   recordMigration(db, "2026-07-14-v7-delivery-requests");
+  recordMigration(db, "2026-08-03-v8-reusable-order-codes");
   setMeta(db, "schema_version", SCHEMA_VERSION);
   setMeta(db, "app_name", "jeff-order-tool");
 }
@@ -999,25 +1004,19 @@ function cleanupBackupFiles() {
   }
 }
 
-function findOrderByCompanyCode(
+function findOrdersByCompanyCode(
   db: Database.Database,
   companyName: string,
   code: string,
-  excludeId?: string,
 ) {
   return db
     .prepare(
       `SELECT id FROM orders
        WHERE lower(trim(code)) = lower(trim(@code))
          AND lower(trim(ifnull(company_name, ''))) = lower(trim(@companyName))
-         AND (@excludeId IS NULL OR id <> @excludeId)
-       LIMIT 1`,
+       ORDER BY created_at, id`,
     )
-    .get({
-      code,
-      companyName,
-      excludeId: excludeId ?? null,
-    }) as { id: string } | undefined;
+    .all({ code, companyName }) as Array<{ id: string }>;
 }
 
 function duplicateLabel(companyName: string, code: string) {
@@ -1173,8 +1172,19 @@ export function createOrders(input: CreateOrdersInput) {
   const db = getDb();
 
   return db.transaction(() => {
+    if (
+      input.submissionKey &&
+      db
+        .prepare(
+          "SELECT submission_key FROM order_entry_submissions WHERE submission_key = ?",
+        )
+        .get(input.submissionKey)
+    ) {
+      return { created: 0, reused: [], alreadySubmitted: true };
+    }
+
     const now = nowIso();
-    const skipped: string[] = [];
+    const reused: Array<{ label: string; total: number }> = [];
     let created = 0;
 
     const insert = db.prepare(`
@@ -1213,9 +1223,16 @@ export function createOrders(input: CreateOrdersInput) {
       : 0;
 
     for (const code of input.codes) {
-      if (findOrderByCompanyCode(db, input.companyName, code)) {
-        skipped.push(duplicateLabel(input.companyName, code));
-        continue;
+      const existingCount = findOrdersByCompanyCode(
+        db,
+        input.companyName,
+        code,
+      ).length;
+      if (existingCount > 0) {
+        reused.push({
+          label: duplicateLabel(input.companyName, code),
+          total: existingCount + 1,
+        });
       }
 
       const id = randomUUID();
@@ -1290,7 +1307,14 @@ export function createOrders(input: CreateOrdersInput) {
       created += 1;
     }
 
-    return { created, skipped };
+    if (input.submissionKey) {
+      db.prepare(
+        `INSERT INTO order_entry_submissions (submission_key, created_at)
+         VALUES (?, ?)`,
+      ).run(input.submissionKey, now);
+    }
+
+    return { created, reused, alreadySubmitted: false };
   })();
 }
 
@@ -1410,7 +1434,24 @@ export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
           ((importedRequest && deliveryQuantityTotal(importedRequest) > 0) ||
             item.deliveryRequest.note.trim()),
       );
-      const current = findOrderByCompanyCode(db, item.companyName, code);
+      const sourceId = item.sourceId?.trim() || "";
+      const currentById = sourceId
+        ? (db
+            .prepare("SELECT id FROM orders WHERE id = ? LIMIT 1")
+            .get(sourceId) as { id: string } | undefined)
+        : undefined;
+      const businessMatches = !sourceId
+        ? findOrdersByCompanyCode(db, item.companyName, code)
+        : [];
+
+      if (!sourceId && businessMatches.length > 1) {
+        skipped.push(
+          `${duplicateLabel(item.companyName, code)}：存在多笔同号订单，旧 CSV 无记录ID，已安全跳过`,
+        );
+        continue;
+      }
+
+      const current = currentById ?? businessMatches[0];
       const existingDeliveryCount = current
         ? (
             db
@@ -1463,7 +1504,7 @@ export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {
             ? "PARTIAL"
             : item.status;
       const values = {
-        id: current?.id ?? randomUUID(),
+        id: (current?.id ?? sourceId) || randomUUID(),
         code,
         companyName: item.companyName || null,
         factoryName: item.factoryName || null,
@@ -1588,7 +1629,18 @@ function importDeliveriesFromSqliteBackup(sourceDb: Database.Database) {
     for (const row of rows) {
       const code = textValue(row, "order_code");
       const companyName = textValue(row, "order_company");
-      const target = findOrderByCompanyCode(db, companyName, code);
+      const sourceOrderId = textValue(row, "order_id");
+      const targetById = sourceOrderId
+        ? (db
+            .prepare("SELECT id FROM orders WHERE id = ? LIMIT 1")
+            .get(sourceOrderId) as { id: string } | undefined)
+        : undefined;
+      const businessMatches = targetById
+        ? []
+        : findOrdersByCompanyCode(db, companyName, code);
+      const target =
+        targetById ??
+        (businessMatches.length === 1 ? businessMatches[0] : undefined);
 
       if (!target) {
         continue;
@@ -1712,6 +1764,7 @@ export function importOrdersFromSqliteBackup(sourcePath: string) {
 
       return [
         {
+          sourceId: textValue(row, "id") || undefined,
           code,
           codes: [code],
           companyName: textValue(row, "company_name"),
@@ -1778,10 +1831,6 @@ export function updateOrder(input: UpdateOrderInput) {
 
   if (!current) {
     return "missing" as const;
-  }
-
-  if (findOrderByCompanyCode(db, input.companyName, current.code, input.id)) {
-    return "duplicate" as const;
   }
 
   const now = nowIso();

@@ -1,6 +1,6 @@
 {
   "name": "jeff-order-tool",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "scripts": {
     "dev": "next dev",
     "dev:lan": "next dev --hostname 0.0.0.0",
@@ -14,6 +14,7 @@
     "test:cloud-migration": "tsx scripts/test-cloud-migration.mts",
     "test:cloud-sync": "tsx scripts/test-cloud-sync.mts",
     "test:local-sync": "tsx scripts/test-local-cloud-sync.mts",
+    "test:duplicate-orders": "tsx scripts/test-duplicate-orders.mts",
     "start:cloud": "node scripts/start-cloud.cjs",
     "start": "next start",
     "lint": "eslint"
@@ -41,7 +42,7 @@
     "typescript": "^5"
   },
   "overrides": {
-    "postcss": "8.5.15",
+    "postcss": "8.5.25",
     "sharp": "0.35.3"
   }
 }

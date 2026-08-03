@@ -63,6 +63,7 @@ import {
 type WorkbenchProps = {
   cloudMode: boolean;
   dataVersion: string;
+  entrySubmissionKey: string;
   initialEvents: OrderEventRecord[];
   initialOrders: OrderRecord[];
   phoneAccess: PhoneAccess;
@@ -1548,11 +1549,13 @@ function OrderRow({
   active,
   onSelect,
   returnWorkflowEnabled,
+  sameNumberCount,
 }: {
   order: OrderRecord;
   active: boolean;
   onSelect: () => void;
   returnWorkflowEnabled: boolean;
+  sameNumberCount: number;
 }) {
   const summary = productSummary(order);
   const returnedSummary = returnWorkflowEnabled ? returnSummary(order) : "";
@@ -1585,6 +1588,11 @@ function OrderRow({
           </div>
         </div>
         <div className="flex shrink-0 gap-1">
+          {sameNumberCount > 1 ? (
+            <Badge className="border-blue-200 bg-blue-50 text-blue-800">
+              同号 {sameNumberCount} 笔
+            </Badge>
+          ) : null}
           <Badge className={statusTone[displayedStatus]}>
             {statusLabels[displayedStatus]}
           </Badge>
@@ -1820,6 +1828,7 @@ function MobileDetail({
 export function Workbench({
   cloudMode,
   dataVersion,
+  entrySubmissionKey: initialEntrySubmissionKey,
   initialEvents,
   initialOrders,
   phoneAccess,
@@ -1842,6 +1851,27 @@ export function Workbench({
   const [notice, setNotice] = useState<ActionResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [entryFormKey, setEntryFormKey] = useState(0);
+  const [entrySubmissionKey, setEntrySubmissionKey] = useState(
+    initialEntrySubmissionKey,
+  );
+
+  const sameNumberCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const order of orders) {
+      const key = `${order.companyName.trim().toLowerCase()}\u001f${order.code
+        .trim()
+        .toLowerCase()}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [orders]);
+
+  function sameNumberCount(order: OrderRecord) {
+    const key = `${order.companyName.trim().toLowerCase()}\u001f${order.code
+      .trim()
+      .toLowerCase()}`;
+    return sameNumberCounts.get(key) ?? 1;
+  }
 
   const exactMatches = query.trim()
     ? orders.filter(
@@ -1849,11 +1879,11 @@ export function Workbench({
       )
     : [];
   const exactMatch = exactMatches.length === 1 ? exactMatches[0] : null;
-  const selected =
-    exactMatch ??
-    orders.find((order) => order.id === selectedId) ??
-    orders[0] ??
-    null;
+  const selected = exactMatch
+    ? exactMatch
+    : exactMatches.length > 1
+      ? exactMatches.find((order) => order.id === selectedId) ?? null
+      : orders.find((order) => order.id === selectedId) ?? orders[0] ?? null;
 
   const stats = useMemo(
     () => {
@@ -2065,6 +2095,7 @@ export function Workbench({
       if (actionResult.ok && reset) {
         form.reset();
         setEntryFormKey((key) => key + 1);
+        setEntrySubmissionKey(crypto.randomUUID());
       }
 
       router.refresh();
@@ -2075,6 +2106,7 @@ export function Workbench({
 
   function exportCsv() {
     const headers = [
+      "记录ID",
       "号码",
       "公司",
       "工厂",
@@ -2132,6 +2164,7 @@ export function Workbench({
         .join("；");
 
       return [
+        order.id,
         order.code,
         order.companyName,
         order.factoryName,
@@ -2247,6 +2280,11 @@ export function Workbench({
           </label>
           {query.trim() ? (
             <div className="mt-3 grid gap-2">
+              {exactMatches.length > 1 ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
+                  找到 {exactMatches.length} 笔同号订单，请按登记日期、工厂和数量选择
+                </div>
+              ) : null}
               {searchResults.length > 0 ? (
                 searchResults.map((order) => (
                   <OrderRow
@@ -2255,6 +2293,7 @@ export function Workbench({
                     active={order.id === selected?.id}
                     onSelect={() => setSelectedId(order.id)}
                     returnWorkflowEnabled={returnWorkflowEnabled}
+                    sameNumberCount={sameNumberCount(order)}
                   />
                 ))
               ) : (
@@ -2363,6 +2402,11 @@ export function Workbench({
                   }
                   className="grid gap-3 p-4"
                 >
+                  <input
+                    type="hidden"
+                    name="submissionKey"
+                    value={entrySubmissionKey}
+                  />
                   <input type="hidden" name="registeredAt" value={today} />
                   <input type="hidden" name="quantity" value="1" />
                   <div className="overflow-x-auto rounded-md border border-zinc-300">
@@ -2518,6 +2562,7 @@ export function Workbench({
                       active={order.id === selected?.id}
                       onSelect={() => setSelectedId(order.id)}
                       returnWorkflowEnabled={returnWorkflowEnabled}
+                      sameNumberCount={sameNumberCount(order)}
                     />
                   ))
                 ) : (
@@ -2540,6 +2585,7 @@ export function Workbench({
                       active={order.id === selected?.id}
                       onSelect={() => setSelectedId(order.id)}
                       returnWorkflowEnabled={returnWorkflowEnabled}
+                      sameNumberCount={sameNumberCount(order)}
                     />
                   ))
                 ) : (
@@ -2562,6 +2608,7 @@ export function Workbench({
                       active={order.id === selected?.id}
                       onSelect={() => setSelectedId(order.id)}
                       returnWorkflowEnabled={returnWorkflowEnabled}
+                      sameNumberCount={sameNumberCount(order)}
                     />
                   ))
                 ) : (
@@ -2950,6 +2997,7 @@ export function Workbench({
                       active={order.id === selected?.id}
                       onSelect={() => setSelectedId(order.id)}
                       returnWorkflowEnabled={returnWorkflowEnabled}
+                      sameNumberCount={sameNumberCount(order)}
                     />
                   ))
                 ) : (

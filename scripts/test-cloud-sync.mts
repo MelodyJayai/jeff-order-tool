@@ -66,7 +66,7 @@ try {
         code: "000000",
         installationId: "test-installation",
         name: "Test computer",
-        appVersion: "0.1.27",
+        appVersion: "0.1.28",
       }),
     /配对码不正确/,
   );
@@ -75,7 +75,7 @@ try {
     code: `${pairing.code.slice(0, 3)} ${pairing.code.slice(3)}`,
     installationId: "test-installation",
     name: "Test computer",
-    appVersion: "0.1.27",
+    appVersion: "0.1.28",
   });
   const authenticated = store.authenticateCloudSyncToken(
     `Bearer ${paired.token}`,
@@ -150,6 +150,50 @@ try {
   );
   assert.equal(resolved?.status, "applied");
   assert.equal(resolved?.reportId, report.id);
+
+  dbModule.closeDatabaseForMigration();
+  const duplicateSource = path.join(testRoot, "source-duplicate.db");
+  await snapshot(cloudPath, duplicateSource);
+  const duplicateLocal = new Database(duplicateSource);
+  try {
+    const now = new Date().toISOString();
+    duplicateLocal.prepare(`
+      INSERT INTO orders (
+        id, code, company_name, registered_at, status, urgency,
+        note, created_at, updated_at
+      ) VALUES ('sync-order-a-reused', 'SYNC-A', 'Sync Company', '2026-08-03',
+        'PENDING', 'NORMAL', 'separate reused number', ?, ?)
+    `).run(now, now);
+  } finally {
+    duplicateLocal.close();
+  }
+  const duplicateApplied = await service.processCloudSyncUpload({
+    device: authenticated,
+    sourceFilename: "source-duplicate.db",
+    sourceChangeToken: "change-3",
+    bytes: fs.readFileSync(duplicateSource),
+  });
+  assert.equal(duplicateApplied.status, "applied");
+  assert.equal(duplicateApplied.created, 1);
+  dbModule.closeDatabaseForMigration();
+  const duplicateCloud = new Database(cloudPath, {
+    fileMustExist: true,
+    readonly: true,
+  });
+  try {
+    assert.equal(
+      (
+        duplicateCloud
+          .prepare(
+            "SELECT COUNT(*) AS count FROM orders WHERE company_name = 'Sync Company' AND code = 'SYNC-A'",
+          )
+          .get() as { count: number }
+      ).count,
+      2,
+    );
+  } finally {
+    duplicateCloud.close();
+  }
 
   const adminState = store.getCloudSyncAdminState();
   assert.equal(adminState.devices.filter((item) => !item.revokedAt).length, 1);

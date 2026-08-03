@@ -103,7 +103,8 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_request_date TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_request_note TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_request_updated_at TEXT;`,
   "",
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_company_code_unique
+  `DROP INDEX IF EXISTS idx_orders_company_code_unique;
+CREATE INDEX IF NOT EXISTS idx_orders_company_code
 ON orders (lower(trim(coalesce(company_name, ''))), lower(trim(code)));`,
   "",
   `CREATE TABLE IF NOT EXISTS order_events (

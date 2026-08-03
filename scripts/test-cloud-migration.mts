@@ -352,7 +352,75 @@ try {
     /已经回滚过/,
   );
 
-  assert.equal(migration.getRecentMigrationReports(10).length, 3);
+  const duplicateSource = path.join(testRoot, "source-duplicate.db");
+  await snapshot(cloudPath, duplicateSource);
+  const duplicateLocal = openDatabase(duplicateSource);
+  try {
+    insertOrder(duplicateLocal, {
+      id: "order-a-reused",
+      code: "A100",
+      note: "same business number, separate order",
+    });
+  } finally {
+    duplicateLocal.close();
+  }
+  const duplicatePreview = await migration.createMigrationPreview(
+    "source-duplicate.db",
+    databaseBytes(duplicateSource),
+  );
+  assert.equal(duplicatePreview.counts.source_only, 1);
+  assert.equal(duplicatePreview.counts.identical, 6);
+  const duplicateReport = await migration.applyMigration(
+    duplicatePreview.sessionId,
+    "merge",
+    {},
+  );
+  assert.equal(duplicateReport.created, 1);
+  const afterDuplicateMerge = openDatabase(cloudPath);
+  try {
+    assert.equal(
+      count(
+        afterDuplicateMerge,
+        "orders",
+        "company_name = 'Jeff Test Company' AND code = 'A100'",
+      ),
+      2,
+    );
+    assert.equal(count(afterDuplicateMerge, "orders", "id = 'order-a'"), 1);
+    assert.equal(
+      count(afterDuplicateMerge, "orders", "id = 'order-a-reused'"),
+      1,
+    );
+  } finally {
+    afterDuplicateMerge.close();
+  }
+
+  const ambiguousSource = path.join(testRoot, "source-ambiguous.db");
+  initializeDatabase(ambiguousSource);
+  const ambiguousDb = openDatabase(ambiguousSource);
+  try {
+    insertOrder(ambiguousDb, {
+      id: "unrelated-a-1",
+      code: "A100",
+      note: "ambiguous one",
+    });
+    insertOrder(ambiguousDb, {
+      id: "unrelated-a-2",
+      code: "A100",
+      note: "ambiguous two",
+    });
+  } finally {
+    ambiguousDb.close();
+  }
+  await assert.rejects(
+    migration.createMigrationPreview(
+      "source-ambiguous.db",
+      databaseBytes(ambiguousSource),
+    ),
+    /同号订单无法安全对应/,
+  );
+
+  assert.equal(migration.getRecentMigrationReports(10).length, 4);
   assert.equal(maintenance.getMigrationMaintenance(), null);
   console.log("Cloud migration integration tests passed.");
 } finally {
