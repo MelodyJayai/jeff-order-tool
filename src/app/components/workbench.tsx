@@ -47,6 +47,14 @@ import {
 import { COMPANY_OPTIONS, FACTORY_OPTIONS } from "@/lib/companies";
 import { formatDateTime } from "@/lib/date";
 import {
+  deliveryTotals,
+  orderQuantity,
+  remainingQuantities,
+  remainingTotal,
+  summarizeOpenOrders,
+  uncategorizedDelivered,
+} from "@/lib/order-quantities";
+import {
   ORDER_STATUSES,
   URGENCY_LEVELS,
   type ActionResult,
@@ -281,47 +289,6 @@ function mergedOptions(
   );
 }
 
-function quantityValues(order: OrderRecord) {
-  return {
-    suitQuantity: order.suitQuantity,
-    jacketQuantity: order.jacketQuantity,
-    pantQuantity: order.pantQuantity,
-    vestQuantity: order.vestQuantity,
-    coatQuantity: order.coatQuantity,
-  };
-}
-
-function orderQuantity(order: OrderRecord) {
-  const categoryTotal = calculateTotalQuantity(quantityValues(order));
-  return categoryTotal > 0 ? categoryTotal : order.quantity;
-}
-
-function emptyQuantities(): DeliveryQuantities {
-  return {
-    suitQuantity: 0,
-    jacketQuantity: 0,
-    pantQuantity: 0,
-    vestQuantity: 0,
-    coatQuantity: 0,
-  };
-}
-
-function deliveryTotals(order: OrderRecord) {
-  return order.deliveries.reduce<DeliveryQuantities>((totals, delivery) => {
-    PRODUCT_COLUMNS.forEach((item) => {
-      totals[item.key] += delivery[item.key];
-    });
-    return totals;
-  }, emptyQuantities());
-}
-
-function uncategorizedDelivered(order: OrderRecord) {
-  return order.deliveries.reduce(
-    (total, delivery) => total + delivery.uncategorizedQuantity,
-    0,
-  );
-}
-
 function deliveryRequestQuantities(order: OrderRecord) {
   return {
     suitQuantity: order.deliveryRequest.suitQuantity,
@@ -346,45 +313,6 @@ function hasActualDelivery(order: OrderRecord) {
 
 function hasFirstDelivery(order: OrderRecord) {
   return hasDeliveryRequest(order) || hasActualDelivery(order);
-}
-
-function remainingQuantities(order: OrderRecord) {
-  if (order.status === "WRITTEN_OFF") {
-    return emptyQuantities();
-  }
-
-  if (order.status === "RETURNED") {
-    return {
-      suitQuantity: order.returnSuitQuantity,
-      jacketQuantity: order.returnJacketQuantity,
-      pantQuantity: order.returnPantQuantity,
-      vestQuantity: order.returnVestQuantity,
-      coatQuantity: order.returnCoatQuantity,
-    };
-  }
-
-  const delivered = deliveryTotals(order);
-  const remaining = emptyQuantities();
-  PRODUCT_COLUMNS.forEach((item) => {
-    remaining[item.key] = Math.max(order[item.key] - delivered[item.key], 0);
-  });
-  return remaining;
-}
-
-function remainingTotal(order: OrderRecord) {
-  if (order.status === "WRITTEN_OFF") {
-    return 0;
-  }
-
-  if (order.status === "RETURNED") {
-    return calculateTotalQuantity(remainingQuantities(order));
-  }
-
-  const delivered = calculateTotalQuantity(deliveryTotals(order));
-  return Math.max(
-    orderQuantity(order) - delivered - uncategorizedDelivered(order),
-    0,
-  );
 }
 
 function quantitySummary(values: DeliveryQuantities) {
@@ -1081,7 +1009,7 @@ function ReturnOrderForm({
   today: string;
 }) {
   const isEditing = order.status === "RETURNED";
-  const hasCategoryQuantities = calculateTotalQuantity(quantityValues(order)) > 0;
+  const hasCategoryQuantities = calculateTotalQuantity(order) > 0;
 
   return (
     <form
@@ -2050,31 +1978,10 @@ export function Workbench({
     };
   }, [filteredOrders]);
 
-  const pendingQuantitySummary = useMemo(() => {
-    const pendingOrders = orders.filter((order) => order.status !== "WRITTEN_OFF");
-    const categories = PRODUCT_COLUMNS.map((item) => ({
-      ...item,
-      total: pendingOrders.reduce(
-        (sum, order) => sum + remainingQuantities(order)[item.key],
-        0,
-      ),
-    }));
-    const categoryTotal = pendingOrders.reduce(
-      (sum, order) =>
-        sum + calculateTotalQuantity(remainingQuantities(order)),
-      0,
-    );
-    const quantity = pendingOrders.reduce(
-      (sum, order) => sum + remainingTotal(order),
-      0,
-    );
-
-    return {
-      categories,
-      quantity,
-      uncategorized: Math.max(quantity - categoryTotal, 0),
-    };
-  }, [orders]);
+  const pendingQuantitySummary = useMemo(
+    () => summarizeOpenOrders(orders),
+    [orders],
+  );
 
   async function submit(
     event: FormEvent<HTMLFormElement>,
@@ -2315,7 +2222,7 @@ export function Workbench({
             label="今日出货"
             value={stats.todayWrittenOff}
           />
-          <Stat icon={ListChecks} label="待核销" value={stats.open} />
+          <Stat icon={ListChecks} label="未完成" value={stats.open} />
           <Stat icon={Clock3} label="先交关注" value={stats.firstDeliveryOpen} />
           <Stat icon={Flame} label="急单" value={stats.urgentOpen} />
         </section>
@@ -2324,10 +2231,10 @@ export function Workbench({
           <div className="flex min-h-12 flex-wrap items-center justify-between gap-2 border-b border-zinc-200 px-4 py-3">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <ListChecks className="h-4 w-4 text-blue-700" aria-hidden="true" />
-              待核销明细
+              未完成订单剩余明细
             </div>
             <div className="text-xs font-medium text-zinc-500">
-              订单 {stats.open} · 数量 {pendingQuantitySummary.quantity}
+              共 {pendingQuantitySummary.openCount} 张 · 剩余 {pendingQuantitySummary.quantity} 件
             </div>
           </div>
           <div className="grid grid-cols-2 gap-px bg-zinc-200 text-sm sm:grid-cols-3 lg:grid-cols-6">
@@ -2357,6 +2264,22 @@ export function Workbench({
               />
             </div>
           </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-zinc-200 px-4 py-2 text-xs text-zinc-600">
+            <span>待核销 {pendingQuantitySummary.pendingCount} 张</span>
+            <span>已先交 {pendingQuantitySummary.partialCount} 张</span>
+            <span className="font-medium text-blue-800">
+              总剩余 {pendingQuantitySummary.quantity} 件
+            </span>
+          </div>
+          {pendingQuantitySummary.unallocatedDelivered > 0 ? (
+            <div className="flex items-start gap-2 border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>
+                旧交货记录中有 {pendingQuantitySummary.unallocatedDelivered} 件未注明具体品类；
+                总剩余 {pendingQuantitySummary.quantity} 件准确，分品类余额需相应扣除这部分。
+              </span>
+            </div>
+          ) : null}
         </section>
 
         {notice ? (
@@ -2926,7 +2849,7 @@ export function Workbench({
                     className={filterSelectClass(statusFilterTone(statusFilter))}
                   >
                     <option value="ALL">全部状态</option>
-                    <option value="OPEN">未完成</option>
+                    <option value="OPEN">未完成（含已先交）</option>
                     {ORDER_STATUSES.filter(
                       (status) =>
                         returnWorkflowEnabled || status !== "RETURNED",
@@ -2936,7 +2859,9 @@ export function Workbench({
                         value={status}
                         style={statusOptionStyle[status]}
                       >
-                        {statusLabels[status]}
+                        {status === "PENDING"
+                          ? "待核销（未发生交货）"
+                          : statusLabels[status]}
                       </option>
                     ))}
                   </select>
@@ -2975,6 +2900,9 @@ export function Workbench({
                 </div>
               </div>
               <div className="hidden flex-wrap items-center gap-x-6 gap-y-2 border-b border-zinc-200 px-4 py-3 text-sm md:flex">
+                <span className="font-medium text-zinc-600">
+                  筛选 {filteredOrders.length} 张 · 原登记数量
+                </span>
                 {accountSummary.categories.map((item) => (
                   <QuantityPair
                     key={item.key}
@@ -2983,7 +2911,7 @@ export function Workbench({
                   />
                 ))}
                 <QuantityPair
-                  label="数量小计"
+                  label="原登记小计"
                   value={accountSummary.quantity}
                   emphasis
                 />

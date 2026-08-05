@@ -273,7 +273,7 @@ Output:
 release-installers/JeffOrderToolSetup-vVERSION.exe
 ```
 
-For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.28.exe`. It allows repeated order numbers under the same company and consistently uses immutable record IDs for editing, delivery, write-off, import, and cloud synchronization. Ambiguous legacy matches stop instead of overwriting another order.
+For Jeff, the current recommended installer is `release-installers/JeffOrderToolSetup-v0.1.29.exe`. It retains immutable record IDs and repeated order-number support, while clearly separating open-order remaining quantities from original registered quantities. Legacy deliveries without product-level allocation are now disclosed instead of appearing as a synchronization mismatch.
 
 The installer defaults to the current Windows user's local app directory:
 

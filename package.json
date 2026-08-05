@@ -1,6 +1,6 @@
 {
   "name": "jeff-order-tool",
-  "version": "0.1.28",
+  "version": "0.1.29",
   "scripts": {
     "dev": "next dev",
     "dev:lan": "next dev --hostname 0.0.0.0",
@@ -15,6 +15,7 @@
     "test:cloud-sync": "tsx scripts/test-cloud-sync.mts",
     "test:local-sync": "tsx scripts/test-local-cloud-sync.mts",
     "test:duplicate-orders": "tsx scripts/test-duplicate-orders.mts",
+    "test:order-summaries": "tsx scripts/test-order-summaries.mts",
     "start:cloud": "node scripts/start-cloud.cjs",
     "start": "next start",
     "lint": "eslint"
