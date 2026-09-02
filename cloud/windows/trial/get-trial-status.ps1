@@ -49,6 +49,7 @@ if ($publicUrl) {
 
 $taskNames = @(
   "JeffOrderToolCloudTrialServer",
+  "JeffOrderToolCloudTrialNamedTunnel",
   "JeffOrderToolCloudTrialTunnel",
   "JeffOrderToolCloudTrialDailyBackup"
 )
