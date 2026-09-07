@@ -1,0 +1,108 @@
+# 云端入口外部可用性探测。
+#
+# 存在理由：服务器上的 JeffOrderToolCloudTrialWatchdog 只能自愈，且它跑在故障主机自己身上。
+# 整机离线、关机或任务计划服务异常时，本机看门狗一律无效。2026-09-05 后端应用静默停止两天
+# 才被用户发现，根因就是没有任何机器外的视角。这个 workflow 提供的正是那个外部视角。
+#
+# 告警方式：探测失败时让 job 失败，由 GitHub 向仓库所有者发送 workflow 失败邮件。
+# 这里刻意不自动创建 issue —— 本仓库是公开仓库，issue 会实时向所有人公开
+# “该生产服务此刻不可用”，等于给攻击者提供情报。
+#
+# 公开仓库的 Actions 日志同样公开，因此本 workflow 不打印被探测的地址，
+# 也不打印 /api/health 的响应体（其中含 instanceId、schemaVersion 等内部信息）。
+#
+# 重要陷阱：GitHub 会在公开仓库连续 60 天没有任何提交后自动停用定时 workflow，
+# 并给所有者发邮件。届时告警会静默失效，必须在仓库页面手动重新启用。
+
+name: Uptime Check
+
+on:
+  schedule:
+    # 每 10 分钟。GitHub 在高负载时会延迟甚至跳过定时任务，
+    # 因此这是“大致 10 分钟”，用于告警足够，不要当作精确监控。
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # 上一次探测还没跑完时跳过本次，避免定时任务堆积。
+  group: uptime-check
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe health endpoint
+        env:
+          HEALTH_URL: ${{ secrets.JEFF_HEALTH_URL }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${HEALTH_URL}" ]; then
+            echo "未配置 JEFF_HEALTH_URL secret，跳过探测。"
+            echo "在仓库 Settings → Secrets and variables → Actions 中添加后即会生效。"
+            exit 0
+          fi
+
+          # 连续失败才判定为故障。单次失败可能只是 Cloudflare 边缘或
+          # GitHub runner 出网的瞬时抖动，不值得叫醒任何人。
+          attempts=3
+          delay=20
+          failures=0
+          last_reason=""
+
+          for i in $(seq 1 "${attempts}"); do
+            # 只取回状态码与 ok 字段，响应体不进日志。
+            body_file="$(mktemp)"
+
+            # 失败兜底必须写在命令替换之外。curl 连接失败时 --write-out 本身
+            # 就会输出 000 并返回非零退出码，若写成 $(curl ... || echo 000)
+            # 两个输出会拼成 "000000"，导致连接失败被误报为一个古怪的 HTTP 状态码。
+            if ! status="$(curl \
+              --silent \
+              --show-error \
+              --location \
+              --max-time 25 \
+              --output "${body_file}" \
+              --write-out '%{http_code}' \
+              "${HEALTH_URL}" 2>/dev/null)"; then
+              status="000"
+            fi
+
+            # 刻意用 grep/sed 而不是 jq 解析：依赖更少，且这段逻辑可以在
+            # 开发机上用同一个 shell 原样验证，不必依赖 runner 预装的工具。
+            if [ "${status}" = "200" ] && grep -qE '"ok"[[:space:]]*:[[:space:]]*true' "${body_file}"; then
+              version="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${body_file}" | head -n 1)"
+              echo "第 ${i} 次探测成功：HTTP 200，ok=true，version=${version:-unknown}"
+              rm -f "${body_file}"
+              exit 0
+            fi
+
+            if [ "${status}" = "000" ]; then
+              last_reason="连接失败或超时"
+            elif [ "${status}" = "200" ]; then
+              last_reason="HTTP 200 但响应中 ok 不为 true（应用起来了但自检不通过）"
+            else
+              last_reason="HTTP ${status}"
+            fi
+
+            rm -f "${body_file}"
+            failures=$((failures + 1))
+            echo "第 ${i} 次探测失败：${last_reason}"
+
+            if [ "${i}" -lt "${attempts}" ]; then
+              sleep "${delay}"
+            fi
+          done
+
+          echo "::error::云端入口连续 ${failures} 次探测失败，最后一次原因：${last_reason}"
+          echo ""
+          echo "排查顺序（详见 Jeff订单工具全景交接与当前状态 的 8.4 与 8.5 节）："
+          echo "  HTTP 502 → 隧道正常但后端应用已停止，检查 JeffOrderToolCloudTrialServer 与 logs\\watchdog.log"
+          echo "  HTTP 530 → 隧道出站问题，检查 Clash 是否又切回全局 TUN 模式"
+          echo "  连接超时 → 云桌面可能整机离线或已关机，这是本机看门狗无法覆盖的情况"
+          exit 1
