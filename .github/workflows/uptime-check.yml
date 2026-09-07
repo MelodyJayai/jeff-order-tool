@@ -40,6 +40,11 @@ jobs:
         env:
           HEALTH_URL: ${{ secrets.JEFF_HEALTH_URL }}
         run: |
+          # GitHub 用 `bash -e` 运行这段脚本，errexit 始终开启，无论这里怎么 set。
+          # 因此所有可能返回非零的探测命令（curl、grep）都必须留在 if 条件之内——
+          # 条件语句中的失败不触发 errexit。一旦把它们移到 if 之外，
+          # 第一次探测失败就会直接终止脚本，跳过重试和错误归类，
+          # 结果是 job 虽然失败了，但日志里没有任何可读的失败原因。
           set -uo pipefail
 
           if [ -z "${HEALTH_URL}" ]; then
