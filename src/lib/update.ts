@@ -222,6 +222,18 @@ async function checkGitHubReleaseUpdate(repository: string) {
 }
 
 export async function checkForUpdates(): Promise<UpdateInfo> {
+  if (process.platform === "darwin") {
+    return info({
+      ok: true,
+      latestVersion: getCurrentVersion(),
+      updateAvailable: false,
+      assetName: null,
+      downloadUrl: null,
+      releaseUrl: `https://github.com/${DEFAULT_UPDATE_REPOSITORY}/releases`,
+      message: "macOS 版请从发布页手动下载更新，订单数据会保留在 Application Support",
+    });
+  }
+
   if (areInAppUpdatesDisabled()) {
     return info({
       ok: true,

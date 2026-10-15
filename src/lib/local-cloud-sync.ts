@@ -78,6 +78,7 @@ export type LocalCloudSyncPushResult = LocalCloudSyncStatus & {
 const CONFIG_VERSION = 1;
 const REQUEST_TIMEOUT_MS = 60_000;
 const RETRY_AFTER_MS = 5 * 60 * 1000;
+const MAC_KEYCHAIN_SERVICE = "com.jeffordertools.cloud-sync";
 let activePush: Promise<LocalCloudSyncPushResult> | null = null;
 
 function configPath() {
@@ -132,10 +133,6 @@ function dpapiCommand(mode: "protect" | "unprotect") {
 }
 
 function runDpapi(mode: "protect" | "unprotect", value: string) {
-  if (process.platform !== "win32") {
-    throw new Error("离线同步凭据只能在 Windows 版中保存");
-  }
-
   const encodedCommand = Buffer.from(
     dpapiCommand(mode),
     "utf16le",
@@ -165,6 +162,90 @@ function runDpapi(mode: "protect" | "unprotect", value: string) {
   }
 
   return result.stdout.trim();
+}
+
+function runMacKeychain(
+  mode: "protect" | "unprotect" | "delete",
+  value: string,
+  account: string,
+) {
+  const args =
+    mode === "protect"
+      ? [
+          "add-generic-password",
+          "-a",
+          account,
+          "-s",
+          MAC_KEYCHAIN_SERVICE,
+          "-w",
+          value,
+          "-U",
+        ]
+      : [
+          mode === "unprotect"
+            ? "find-generic-password"
+            : "delete-generic-password",
+          "-a",
+          account,
+          "-s",
+          MAC_KEYCHAIN_SERVICE,
+          ...(mode === "unprotect" ? ["-w"] : []),
+        ];
+  const result = spawnSync("security", args, {
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+    timeout: 15_000,
+  });
+
+  if (mode === "delete") {
+    return;
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      mode === "protect"
+        ? "macOS 无法安全保存云端同步凭据，请确认已允许访问钥匙串"
+        : "macOS 无法读取云端同步凭据，请重新连接云端",
+    );
+  }
+  if (mode === "unprotect" && !result.stdout.trim()) {
+    throw new Error("macOS 无法读取云端同步凭据，请重新连接云端");
+  }
+  return result.stdout.trim();
+}
+
+function protectCredential(token: string, installationId: string) {
+  if (process.platform === "win32") {
+    return runDpapi("protect", token);
+  }
+  if (process.platform === "darwin") {
+    const account = `device:${installationId}`;
+    runMacKeychain("protect", token, account);
+    return `keychain:${account}`;
+  }
+  throw new Error("离线同步目前支持 Windows 和 macOS，请在受支持的电脑上连接云端");
+}
+
+function unprotectCredential(protectedToken: string) {
+  if (protectedToken.startsWith("keychain:") && process.platform === "darwin") {
+    const account = protectedToken.slice("keychain:".length);
+    if (!account) {
+      throw new Error("macOS 云端同步凭据无效，请重新连接云端");
+    }
+    return runMacKeychain("unprotect", "", account);
+  }
+  if (process.platform === "win32") {
+    return runDpapi("unprotect", protectedToken);
+  }
+  throw new Error("这份离线同步凭据属于其他系统，请重新连接云端");
+}
+
+function deleteCredential(protectedToken: string) {
+  if (process.platform === "darwin" && protectedToken.startsWith("keychain:")) {
+    const account = protectedToken.slice("keychain:".length);
+    if (account) {
+      runMacKeychain("delete", "", account);
+    }
+  }
 }
 
 function isPrivateHostname(hostname: string) {
@@ -218,7 +299,7 @@ async function remoteFetch(
   pathName: string,
   init: RequestInit,
 ) {
-  const token = runDpapi("unprotect", config.protectedToken);
+  const token = unprotectCredential(config.protectedToken);
   return fetch(`${config.serverUrl}${pathName}`, {
     ...init,
     cache: "no-store",
@@ -375,7 +456,7 @@ export async function pairLocalCloudSync(input: {
     deviceId: result.deviceId,
     installationId,
     deviceName: result.deviceName || deviceName,
-    protectedToken: runDpapi("protect", result.token),
+    protectedToken: protectCredential(result.token, installationId),
     autoSync: true,
     connectedAt: now,
     lastAttemptAt: null,
@@ -546,6 +627,10 @@ export function setLocalCloudSyncAutoSync(enabled: boolean) {
 }
 
 export function disconnectLocalCloudSync() {
+  const config = readConfig();
+  if (config) {
+    deleteCredential(config.protectedToken);
+  }
   fs.rmSync(configPath(), { force: true });
   return statusFromConfig(null);
 }

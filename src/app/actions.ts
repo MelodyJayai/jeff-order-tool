@@ -866,6 +866,13 @@ export async function installUpdateAction(): Promise<ActionResult> {
   const blocked = await mutationBlockedResult();
   if (blocked) return blocked;
 
+  if (process.platform !== "win32") {
+    return result(
+      false,
+      "macOS 版暂不自动下载安装包，请从项目发布页下载新版并保留 ~/Library/Application Support/JeffOrderTool/data 数据目录",
+    );
+  }
+
   if (areInAppUpdatesDisabled()) {
     return result(false, "云端版本由服务器统一维护更新，不在网页内安装 Windows 更新包");
   }

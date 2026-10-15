@@ -131,7 +131,7 @@ Windows 防火墙如果提示 Node.js 或 Jeff 订单工具需要访问网络，
 
 云端复用现有三方安全合并：仅本地变化自动采用本地，仅云端变化保留云端，同一订单两边都修改时停止覆盖并等待管理员逐单确认。每次合并前仍会自动备份，可按最近迁移回滚。
 
-设备令牌不包含管理员密码，并使用 Windows DPAPI 加密保存在本机。云端管理员可以随时撤销设备。过渡期建议设置 `JEFF_CLOUD_SYNC_READ_ONLY=true`，让办公室电脑继续作为唯一录入端，云端主要供手机查询。
+设备令牌不包含管理员密码；Windows 使用 DPAPI、macOS 使用系统钥匙串加密保存在本机。云端管理员可以随时撤销设备。过渡期建议设置 `JEFF_CLOUD_SYNC_READ_ONLY=true`，让办公室电脑继续作为唯一录入端，云端主要供手机查询。
 
 完整说明见：
 
@@ -196,6 +196,24 @@ start-jeff-order-tool.cmd
 ```
 
 它会启动服务并打开本机页面。
+
+### macOS 支持
+
+macOS 使用与 Windows 相同的 Next.js 应用和 SQLite 数据格式。先安装 Node.js LTS，然后在项目目录运行：
+
+```bash
+npm install
+npm run build
+npm run start:mac
+```
+
+脚本会启动本机服务并打开浏览器；订单数据和备份默认保存在：
+
+```text
+~/Library/Application Support/JeffOrderTool/data
+```
+
+需要发送一个可独立运行的 macOS 目录时，运行 `npm run build:desktop:mac`，生成的 `release/JeffOrderTool` 中包含 `start-jeff-order-tool.sh`。macOS 云端同步凭据保存在系统钥匙串中，断开云端时会一并清理对应钥匙串项。Windows 的 `.exe` 安装包和更新助手不在 macOS 上运行，macOS 新版本请从发布页手动下载并保留上述 `data` 目录。完整说明见 `docs/macos.zh.md`。
 
 ## 云端部署
 

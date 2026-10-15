@@ -175,7 +175,7 @@ The desktop page also shows a QR code for phone access when a private LAN addres
 
 For Jeff's multi-device workflow, use the cloud mode so phones and computers edit the same server-side data. Cloud mode keeps login protection, uses a fixed data directory, hides the Windows installer update card, and supports both a Windows cloud-desktop trial and a Docker deployment.
 
-Starting with `0.1.27`, the Windows offline edition can pair with a cloud deployment using a short-lived six-digit code. The client creates a consistent SQLite backup, uploads it over HTTPS, and reuses the server's three-way migration engine. Conflict-free changes are merged automatically; orders changed both locally and in the cloud wait for administrator review. The upload token has no administrator privileges and is encrypted locally with Windows DPAPI.
+Starting with `0.1.27`, the Windows and macOS offline editions can pair with a cloud deployment using a short-lived six-digit code. The client creates a consistent SQLite backup, uploads it over HTTPS, and reuses the server's three-way migration engine. Conflict-free changes are merged automatically; orders changed both locally and in the cloud wait for administrator review. The upload token has no administrator privileges and is encrypted locally with Windows DPAPI or stored in the macOS Keychain.
 
 During a transition where the office PC remains the source of truth, set `JEFF_CLOUD_SYNC_READ_ONLY=true` on the server. This keeps cloud access read-only for normal order operations while still accepting protected synchronization uploads. See `docs/cloud-sync.zh.md` for the complete Chinese operations guide.
 

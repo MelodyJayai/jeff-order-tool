@@ -21,6 +21,8 @@
 
 Windows 离线版使用当前 Windows 用户的 DPAPI 加密令牌。加密结果保存在 `data/cloud-sync-client.json`，原始令牌不会写入文件。复制这个文件到另一台电脑也不能解密使用。
 
+macOS 离线版使用当前登录用户的系统钥匙串保存令牌。`data/cloud-sync-client.json` 只保存钥匙串引用，不保存原始令牌；把配置文件复制到另一台 Mac 后仍需重新配对。首次同步时 macOS 可能提示允许 Jeff 订单工具访问钥匙串，请选择允许。
+
 云端把设备令牌的哈希、设备名称和同步记录保存在 `data/cloud-sync-devices.json`。管理员可以随时撤销某台电脑的同步授权。
 
 ## 3. 日常同步
@@ -75,4 +77,4 @@ npm run lint
 npm run build
 ```
 
-`test:local-sync` 在 Windows 上实际验证 DPAPI 加密、令牌不明文落盘、一致性备份上传和授权请求；非 Windows 环境会跳过 DPAPI 测试。
+`test:local-sync` 在 Windows 上实际验证 DPAPI 加密、令牌不明文落盘、一致性备份上传和授权请求；macOS 使用系统钥匙串保存令牌。其他非 Windows/macOS 环境会跳过本机凭据加密测试。

@@ -97,9 +97,30 @@ const globalForDb = globalThis as typeof globalThis & {
   __jeffOrderDb?: Database.Database;
 };
 
+function defaultDataDirectory() {
+  const configured = process.env.JEFF_ORDER_DATA_DIR?.trim();
+  if (configured) {
+    return path.resolve(configured);
+  }
+
+  // Keep the existing portable-folder behavior on Windows. macOS stores
+  // mutable user data in Application Support so app upgrades do not replace it.
+  if (process.platform === "darwin") {
+    return path.join(
+      os.homedir(),
+      "Library",
+      "Application Support",
+      "JeffOrderTool",
+      "data",
+    );
+  }
+
+  return path.join(process.cwd(), "data");
+}
+
 const DB_PATH = process.env.JEFF_ORDER_DB_PATH
   ? path.resolve(process.env.JEFF_ORDER_DB_PATH)
-  : path.join(process.cwd(), "data", "orders.db");
+  : path.join(defaultDataDirectory(), "orders.db");
 const BACKUP_DIR = process.env.JEFF_BACKUP_DIR
   ? path.resolve(process.env.JEFF_BACKUP_DIR)
   : path.join(path.dirname(DB_PATH), "backups");
