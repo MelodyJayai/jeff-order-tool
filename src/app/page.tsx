@@ -6,6 +6,7 @@ import { chinaToday } from "@/lib/date";
 import {
   isCloudDeployment,
   isCloudWriteProtected,
+  isDualHostPreview,
   isReturnWorkflowEnabled,
 } from "@/lib/deployment";
 import {
@@ -49,6 +50,7 @@ export default async function Home() {
   return (
     <Workbench
       cloudMode={cloudMode}
+      dualHostPreview={isDualHostPreview()}
       dataVersion={cloudMode ? "" : getDatabaseChangeToken()}
       entrySubmissionKey={randomUUID()}
       initialEvents={events}

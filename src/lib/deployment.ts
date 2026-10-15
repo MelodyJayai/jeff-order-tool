@@ -2,6 +2,10 @@ export function isCloudDeployment() {
   return process.env.JEFF_DEPLOYMENT_MODE?.trim().toLowerCase() === "cloud";
 }
 
+export function isDualHostPreview() {
+  return process.env.JEFF_DUAL_HOST_PREVIEW?.trim().toLowerCase() === "true";
+}
+
 export function areInAppUpdatesDisabled() {
   return (
     isCloudDeployment() ||

@@ -105,6 +105,37 @@ const BACKUP_DIR = process.env.JEFF_BACKUP_DIR
   : path.join(path.dirname(DB_PATH), "backups");
 const SCHEMA_VERSION = "2026-08-03-v8-reusable-order-codes";
 
+/**
+ * The remote multi-host preview is opt-in. Keeping the check behind an
+ * environment flag means existing desktop/production deployments retain
+ * their current write behavior until the preview is explicitly enabled.
+ */
+export function concurrencyPreviewEnabled() {
+  return process.env.JEFF_CONCURRENCY_PREVIEW === "1";
+}
+
+function expectedVersion(value: string | undefined) {
+  const normalized = value?.trim();
+  return concurrencyPreviewEnabled() && normalized ? normalized : null;
+}
+
+function hasExpectedVersion(
+  db: Database.Database,
+  orderId: string,
+  expectedUpdatedAt: string | undefined,
+) {
+  const expected = expectedVersion(expectedUpdatedAt);
+
+  if (!expected) {
+    return true;
+  }
+
+  const row = db
+    .prepare("SELECT updated_at FROM orders WHERE id = ? LIMIT 1")
+    .get(orderId) as { updated_at?: string } | undefined;
+  return row?.updated_at === expected;
+}
+
 function productValues(input: Record<ProductQuantityKey, number>) {
   return {
     suitQuantity: input.suitQuantity,
@@ -1881,7 +1912,10 @@ export function updateOrder(input: UpdateOrderInput) {
         ? "PARTIAL"
         : "PENDING";
 
-  db.transaction(() => {
+  const saved = db.transaction(() => {
+    if (!hasExpectedVersion(db, input.id, input.expectedUpdatedAt)) {
+      return false;
+    }
     db.prepare(`
       UPDATE orders
       SET company_name = @companyName,
@@ -1916,7 +1950,12 @@ export function updateOrder(input: UpdateOrderInput) {
       "UPDATED",
       "更新订单信息",
     );
+    return true;
   })();
+
+  if (!saved) {
+    return "conflict" as const;
+  }
 
   return "updated" as const;
 }
@@ -1951,7 +1990,10 @@ export function updateOrderDeliveryRequest(
   const hasRequest = requestTotal > 0 || Boolean(input.note.trim());
   const now = nowIso();
 
-  db.transaction(() => {
+  const saved = db.transaction(() => {
+    if (!hasExpectedVersion(db, input.orderId, input.expectedUpdatedAt)) {
+      return false;
+    }
     db.prepare(`
       UPDATE orders
       SET request_suit_quantity = @suitQuantity,
@@ -1985,7 +2027,12 @@ export function updateOrderDeliveryRequest(
             .join("；")}`
         : "清除客户先交要求",
     );
+    return true;
   })();
+
+  if (!saved) {
+    return "conflict" as const;
+  }
 
   return hasRequest ? ("updated" as const) : ("cleared" as const);
 }
@@ -2038,7 +2085,10 @@ export function addOrderDelivery(input: AddOrderDeliveryInput) {
     return "would_complete" as const;
   }
 
-  db.transaction(() => {
+  const saved = db.transaction(() => {
+    if (!hasExpectedVersion(db, input.orderId, input.expectedUpdatedAt)) {
+      return false;
+    }
     insertDelivery(db, input);
     db.prepare(`
       UPDATE orders
@@ -2053,12 +2103,21 @@ export function addOrderDelivery(input: AddOrderDeliveryInput) {
         input.note ? `；${input.note}` : ""
       }`,
     );
+    return true;
   })();
+
+  if (!saved) {
+    return "conflict" as const;
+  }
 
   return "added" as const;
 }
 
-export function removeOrderDelivery(orderId: string, deliveryId: string) {
+export function removeOrderDelivery(
+  orderId: string,
+  deliveryId: string,
+  expectedUpdatedAt?: string,
+) {
   const db = getDb();
   const current = getOrder(orderId);
 
@@ -2086,7 +2145,10 @@ export function removeOrderDelivery(orderId: string, deliveryId: string) {
     return "protected" as const;
   }
 
-  db.transaction(() => {
+  const saved = db.transaction(() => {
+    if (!hasExpectedVersion(db, orderId, expectedUpdatedAt)) {
+      return false;
+    }
     db.prepare("DELETE FROM order_deliveries WHERE id = ?").run(deliveryId);
     const remaining = db
       .prepare(
@@ -2108,7 +2170,12 @@ export function removeOrderDelivery(orderId: string, deliveryId: string) {
       "FIRST_DELIVERY_REMOVED",
       `撤销实际交货 ${delivery.deliveredAt}：${deliverySummary(delivery)}`,
     );
+    return true;
   })();
+
+  if (!saved) {
+    return "conflict" as const;
+  }
 
   return "removed" as const;
 }
@@ -2116,7 +2183,7 @@ export function removeOrderDelivery(orderId: string, deliveryId: string) {
 export function writeOffOrder(
   id: string,
   writtenOffAt: string,
-  options: { replaceReturnedDate?: boolean } = {},
+  options: { replaceReturnedDate?: boolean; expectedUpdatedAt?: string } = {},
 ) {
   const db = getDb();
   const current = getOrder(id);
@@ -2130,6 +2197,9 @@ export function writeOffOrder(
   }
 
   const updated = db.transaction(() => {
+    if (!hasExpectedVersion(db, id, options.expectedUpdatedAt)) {
+      return "conflict" as const;
+    }
     const replaceWrittenOffDate =
       options.replaceReturnedDate && current.status === "RETURNED" ? 1 : 0;
     const result = db.prepare(`
@@ -2190,7 +2260,10 @@ export function markOrderReturned(input: ReturnOrderInput) {
   const eventPrefix =
     current.status === "RETURNED" ? "更新返厂修改" : "返厂修改";
 
-  db.transaction(() => {
+  const saved = db.transaction(() => {
+    if (!hasExpectedVersion(db, input.id, input.expectedUpdatedAt)) {
+      return false;
+    }
     db.prepare(`
       UPDATE orders
       SET status = 'RETURNED',
@@ -2229,12 +2302,17 @@ export function markOrderReturned(input: ReturnOrderInput) {
         input.returnNote ? `；${input.returnNote}` : ""
       }`,
     );
+    return true;
   })();
+
+  if (!saved) {
+    return "conflict" as const;
+  }
 
   return "updated" as const;
 }
 
-export function undoWriteOffOrder(id: string) {
+export function undoWriteOffOrder(id: string, expectedUpdatedAt?: string) {
   const db = getDb();
   const current = getOrder(id);
 
@@ -2244,7 +2322,10 @@ export function undoWriteOffOrder(id: string) {
 
   const hasPartial = current.deliveries.length > 0;
 
-  db.transaction(() => {
+  const saved = db.transaction(() => {
+    if (!hasExpectedVersion(db, id, expectedUpdatedAt)) {
+      return false;
+    }
     db.prepare(`
       UPDATE orders
       SET status = @status,
@@ -2257,7 +2338,8 @@ export function undoWriteOffOrder(id: string) {
       updatedAt: nowIso(),
     });
     insertEvent(db, id, "UNDO_WRITTEN_OFF", "撤销核销");
+    return true;
   })();
 
-  return true;
+  return saved ? true : ("conflict" as const);
 }

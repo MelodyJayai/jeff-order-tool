@@ -18,7 +18,11 @@ import {
   setStoredAdminPasswordHash,
 } from "@/lib/db";
 
-const COOKIE_NAME = "jeff_order_session";
+// Keep the production cookie name unchanged by default. Preview/staging
+// instances can opt into a separate name so logging in on one local port does
+// not overwrite the session for another instance on the same host.
+const COOKIE_NAME =
+  process.env.JEFF_SESSION_COOKIE_NAME?.trim() || "jeff_order_session";
 const HASH_ALGORITHM = "sha256";
 const HASH_ITERATIONS = 210_000;
 const HASH_KEY_LENGTH = 32;

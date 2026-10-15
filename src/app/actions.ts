@@ -557,6 +557,7 @@ export async function updateOrderAction(
     registeredAt: cleanDate(text(formData, "registeredAt"), chinaToday()),
     urgency: urgency(formData),
     note: text(formData, "note"),
+    expectedUpdatedAt: text(formData, "expectedUpdatedAt") || undefined,
   });
 
   revalidatePath("/");
@@ -571,6 +572,10 @@ export async function updateOrderAction(
 
   if (updated === "below_requested") {
     return result(false, "订单数量不能小于已经登记的客户先交要求");
+  }
+
+  if (updated === "conflict") {
+    return result(false, "这条订单已被另一台电脑更新，请刷新后再保存");
   }
 
   return result(false, "记录不存在");
@@ -596,6 +601,7 @@ export async function updateOrderDeliveryRequestAction(
     ),
     note: text(formData, "deliveryRequestNote"),
     ...deliveryRequestProductQuantities(formData),
+    expectedUpdatedAt: text(formData, "expectedUpdatedAt") || undefined,
   });
 
   revalidatePath("/");
@@ -614,6 +620,10 @@ export async function updateOrderDeliveryRequestAction(
 
   if (updated === "closed") {
     return result(false, "已核销或返厂中的订单不能修改客户先交要求");
+  }
+
+  if (updated === "conflict") {
+    return result(false, "这条订单已被另一台电脑更新，请刷新后再保存");
   }
 
   if (typeof updated === "object" && updated.status === "exceeds") {
@@ -643,6 +653,7 @@ export async function addOrderDeliveryAction(
     deliveredAt: cleanDate(text(formData, "deliveryDate"), chinaToday()),
     note: text(formData, "deliveryNote"),
     ...deliveryProductQuantities(formData),
+    expectedUpdatedAt: text(formData, "expectedUpdatedAt") || undefined,
   });
 
   revalidatePath("/");
@@ -668,6 +679,10 @@ export async function addOrderDeliveryAction(
     return result(false, "本次会交完全部剩余数量，请直接使用出货核销");
   }
 
+  if (added === "conflict") {
+    return result(false, "这条订单已被另一台电脑更新，请刷新后再保存");
+  }
+
   if (typeof added === "object" && added.status === "exceeds") {
     return result(
       false,
@@ -691,7 +706,11 @@ export async function removeOrderDeliveryAction(
     return result(false, "没有找到这次实际交货记录");
   }
 
-  const removed = removeOrderDelivery(orderId, deliveryId);
+  const removed = removeOrderDelivery(
+    orderId,
+    deliveryId,
+    text(formData, "expectedUpdatedAt") || undefined,
+  );
 
   revalidatePath("/");
   revalidatePath("/events");
@@ -706,6 +725,10 @@ export async function removeOrderDeliveryAction(
 
   if (removed === "closed") {
     return result(false, "请先撤销核销后再修改实际交货记录");
+  }
+
+  if (removed === "conflict") {
+    return result(false, "这条订单已被另一台电脑更新，请刷新后再保存");
   }
 
   return result(false, "实际交货记录不存在");
@@ -727,6 +750,7 @@ export async function writeOffOrderAction(
   const returnWorkflowEnabled = isReturnWorkflowEnabled();
   const updated = writeOffOrder(id, writtenOffAt, {
     replaceReturnedDate: !returnWorkflowEnabled,
+    expectedUpdatedAt: text(formData, "expectedUpdatedAt") || undefined,
   });
 
   revalidatePath("/");
@@ -746,6 +770,10 @@ export async function writeOffOrderAction(
     return result(false, "已经核销过，不重复记录");
   }
 
+  if (updated === "conflict") {
+    return result(false, "这条订单已被另一台电脑更新，请刷新后再保存");
+  }
+
   return result(false, "记录不存在");
 }
 
@@ -761,9 +789,15 @@ export async function undoWriteOffOrderAction(
     return result(false, "没有找到这条记录");
   }
 
-  const updated = undoWriteOffOrder(id);
+  const updated = undoWriteOffOrder(
+    id,
+    text(formData, "expectedUpdatedAt") || undefined,
+  );
 
   revalidatePath("/");
+  if (updated === "conflict") {
+    return result(false, "这条订单已被另一台电脑更新，请刷新后再保存");
+  }
   return updated ? result(true, "已撤销核销") : result(false, "记录不存在");
 }
 
@@ -791,6 +825,7 @@ export async function markReturnedOrderAction(
     returnedAt: cleanDate(text(formData, "returnedAt"), chinaToday()),
     returnNote: text(formData, "returnNote"),
     ...returnProductQuantities(formData),
+    expectedUpdatedAt: text(formData, "expectedUpdatedAt") || undefined,
   });
 
   revalidatePath("/");
@@ -809,6 +844,10 @@ export async function markReturnedOrderAction(
 
   if (updated === "not_written_off") {
     return result(false, "只有已核销或返厂中的订单才能标记返厂修改");
+  }
+
+  if (updated === "conflict") {
+    return result(false, "这条订单已被另一台电脑更新，请刷新后再保存");
   }
 
   return result(false, "记录不存在");

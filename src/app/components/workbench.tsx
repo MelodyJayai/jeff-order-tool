@@ -71,6 +71,7 @@ import {
 type WorkbenchProps = {
   cloudMode: boolean;
   dataVersion: string;
+  dualHostPreview: boolean;
   entrySubmissionKey: string;
   initialEvents: OrderEventRecord[];
   initialOrders: OrderRecord[];
@@ -728,6 +729,7 @@ function DeliveryRequestSection({
             className="grid gap-2 border-t border-amber-200 p-3"
           >
             <input type="hidden" name="orderId" value={order.id} />
+            <input type="hidden" name="expectedUpdatedAt" value={order.updatedAt} />
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
               {PRODUCT_COLUMNS.map((item) => (
                 <Field
@@ -858,6 +860,7 @@ function DeliverySection({
             className="grid gap-2 border-t border-cyan-100 p-3"
           >
             <input type="hidden" name="orderId" value={order.id} />
+            <input type="hidden" name="expectedUpdatedAt" value={order.updatedAt} />
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
               {PRODUCT_COLUMNS.map((item) => (
                 <Field
@@ -972,6 +975,7 @@ function DeliverySection({
                 >
                   <input type="hidden" name="orderId" value={order.id} />
                   <input type="hidden" name="deliveryId" value={delivery.id} />
+                  <input type="hidden" name="expectedUpdatedAt" value={order.updatedAt} />
                   <button
                     type="submit"
                     disabled={Boolean(busy)}
@@ -1017,6 +1021,7 @@ function ReturnOrderForm({
       className="grid gap-3 rounded-md border border-violet-200 bg-violet-50 p-3"
     >
       <input type="hidden" name="id" value={order.id} />
+      <input type="hidden" name="expectedUpdatedAt" value={order.updatedAt} />
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-semibold text-violet-900">
           {isEditing ? "更新返厂记录" : "返厂修改"}
@@ -1735,6 +1740,7 @@ function MobileDetail({
           className="border-t border-emerald-100 pt-3"
         >
           <input type="hidden" name="id" value={order.id} />
+          <input type="hidden" name="expectedUpdatedAt" value={order.updatedAt} />
           <input type="hidden" name="writtenOffAt" value={today} />
           <button
             type="submit"
@@ -1756,6 +1762,7 @@ function MobileDetail({
 export function Workbench({
   cloudMode,
   dataVersion,
+  dualHostPreview,
   entrySubmissionKey: initialEntrySubmissionKey,
   initialEvents,
   initialOrders,
@@ -2304,6 +2311,12 @@ export function Workbench({
           </div>
         ) : null}
 
+        {dualHostPreview ? (
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
+            双主机异地预览环境：数据和账号与生产隔离，仅用于验证 Windows 和 Mac 同时使用。
+          </div>
+        ) : null}
+
         {isPhoneMode ? (
           <div className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-900">
             {writeProtected
@@ -2639,6 +2652,7 @@ export function Workbench({
                     )}
                   >
                     <input type="hidden" name="id" value={selected.id} />
+                    <input type="hidden" name="expectedUpdatedAt" value={selected.updatedAt} />
                     <input type="hidden" name="quantity" value={selected.quantity} />
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1.25fr)_140px_120px]">
                       <Field label="公司">
@@ -2752,6 +2766,7 @@ export function Workbench({
                       className="grid gap-2 border-t border-emerald-100 pt-3"
                     >
                       <input type="hidden" name="id" value={selected.id} />
+                      <input type="hidden" name="expectedUpdatedAt" value={selected.updatedAt} />
                       <input type="hidden" name="writtenOffAt" value={today} />
                       <div className="text-sm text-zinc-600">
                         {selected.status === "RETURNED" &&
@@ -2791,6 +2806,7 @@ export function Workbench({
                       className="grid content-end gap-2 border-t border-zinc-200 pt-3 sm:border-l sm:border-t-0 sm:pl-3 sm:pt-0"
                     >
                       <input type="hidden" name="id" value={selected.id} />
+                      <input type="hidden" name="expectedUpdatedAt" value={selected.updatedAt} />
                       <button
                         type="submit"
                         disabled={

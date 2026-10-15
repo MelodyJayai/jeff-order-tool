@@ -74,6 +74,8 @@ export type UpdateOrderDeliveryRequestInput = DeliveryQuantities & {
   orderId: string;
   requestedAt: string;
   note: string;
+  /** Snapshot token used by the remote preview to reject stale writes. */
+  expectedUpdatedAt?: string;
 };
 
 export type InitialOrderDeliveryRequestInput = DeliveryQuantities & {
@@ -95,6 +97,8 @@ export type AddOrderDeliveryInput = DeliveryQuantities & {
   orderId: string;
   deliveredAt: string;
   note: string;
+  /** Snapshot token used by the remote preview to reject stale writes. */
+  expectedUpdatedAt?: string;
 };
 
 export type InitialOrderDeliveryInput = DeliveryQuantities & {
@@ -162,6 +166,8 @@ export type UpdateOrderInput = {
   registeredAt: string;
   urgency: UrgencyLevel;
   note: string;
+  /** Snapshot token used by the remote preview to reject stale writes. */
+  expectedUpdatedAt?: string;
 };
 
 export type ReturnOrderInput = {
@@ -173,6 +179,8 @@ export type ReturnOrderInput = {
   returnPantQuantity: number;
   returnVestQuantity: number;
   returnCoatQuantity: number;
+  /** Snapshot token used by the remote preview to reject stale writes. */
+  expectedUpdatedAt?: string;
 };
 
 export type ActionResult = {
