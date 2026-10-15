@@ -475,7 +475,7 @@ export async function createOrdersAction(
     );
   }
 
-  const { created, reused, alreadySubmitted } = createOrders({
+  const { created, reused, alreadySubmitted, duplicateLabels } = createOrders({
     submissionKey: text(formData, "submissionKey") || undefined,
     codes,
     companyName,
@@ -498,7 +498,18 @@ export async function createOrdersAction(
         }
       : null,
     initialDelivery: null,
+  }, {
+    requireDuplicateConfirmation: true,
+    confirmDuplicates: text(formData, "confirmDuplicates") === "true",
   });
+
+  if (duplicateLabels?.length) {
+    return {
+      ok: false,
+      requiresDuplicateConfirmation: true,
+      message: `以下订单号已登记：\n${duplicateLabels.join("\n")}\n\n是否继续登记为独立新订单？`,
+    };
+  }
 
   revalidatePath("/");
 

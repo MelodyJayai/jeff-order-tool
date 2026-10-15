@@ -179,6 +179,7 @@ export type ActionResult = {
   ok: boolean;
   message: string;
   skipped?: string[];
+  requiresDuplicateConfirmation?: boolean;
 };
 
 export type ImportOrdersResult = {

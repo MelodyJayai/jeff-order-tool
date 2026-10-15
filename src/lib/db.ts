@@ -1168,7 +1168,15 @@ export function getOrder(id: string) {
     : null;
 }
 
-export function createOrders(input: CreateOrdersInput) {
+export function createOrders(
+  input: CreateOrdersInput,
+  options: { requireDuplicateConfirmation?: boolean; confirmDuplicates?: boolean } = {},
+): {
+  created: number;
+  reused: Array<{ label: string; total: number }>;
+  alreadySubmitted: boolean;
+  duplicateLabels?: string[];
+} {
   const db = getDb();
 
   return db.transaction(() => {
@@ -1181,6 +1189,16 @@ export function createOrders(input: CreateOrdersInput) {
         .get(input.submissionKey)
     ) {
       return { created: 0, reused: [], alreadySubmitted: true };
+    }
+
+    // Check the whole batch before writing anything, using current database data.
+    if (options.requireDuplicateConfirmation && !options.confirmDuplicates) {
+      const duplicateLabels = input.codes
+        .filter((code) => findOrdersByCompanyCode(db, input.companyName, code).length > 0)
+        .map((code) => duplicateLabel(input.companyName, code));
+      if (duplicateLabels.length > 0) {
+        return { created: 0, reused: [], alreadySubmitted: false, duplicateLabels };
+      }
     }
 
     const now = nowIso();
@@ -1315,7 +1333,7 @@ export function createOrders(input: CreateOrdersInput) {
     }
 
     return { created, reused, alreadySubmitted: false };
-  })();
+  }).immediate();
 }
 
 export function importOrders(input: ImportOrderInput[]): ImportOrdersResult {

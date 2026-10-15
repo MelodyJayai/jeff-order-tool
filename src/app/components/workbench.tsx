@@ -1995,7 +1995,16 @@ export function Workbench({
     setBusy(busyLabel);
 
     try {
-      const actionResult = await action(new FormData(form));
+      const formData = new FormData(form);
+      let actionResult = await action(formData);
+      if (actionResult.requiresDuplicateConfirmation) {
+        if (!window.confirm(actionResult.message)) {
+          setNotice({ ok: true, message: "已取消登记，填写内容已保留" });
+          return;
+        }
+        formData.set("confirmDuplicates", "true");
+        actionResult = await action(formData);
+      }
       setNotice(actionResult);
       onResult?.(actionResult);
 

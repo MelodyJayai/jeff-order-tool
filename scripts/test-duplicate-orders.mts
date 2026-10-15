@@ -40,18 +40,39 @@ function orderInput(
 }
 
 try {
-  const first = dbModule.createOrders(orderInput("entry-a", "2026-08-02", 2));
+  const guarded = { requireDuplicateConfirmation: true };
+  const first = dbModule.createOrders(orderInput("entry-a", "2026-08-02", 2), guarded);
   assert.equal(first.created, 1);
   assert.equal(first.reused.length, 0);
 
-  const retried = dbModule.createOrders(orderInput("entry-a", "2026-08-02", 2));
+  const retried = dbModule.createOrders(orderInput("entry-a", "2026-08-02", 2), guarded);
   assert.equal(retried.created, 0);
   assert.equal(retried.alreadySubmitted, true);
 
-  const second = dbModule.createOrders(orderInput("entry-b", "2026-08-03", 3));
+  const beforePrompt = dbModule.listOrderEvents();
+  const pending = dbModule.createOrders({
+    ...orderInput("entry-b", "2026-08-03", 3),
+    // The new number comes first: a rejected batch must still write nothing.
+    codes: ["NEW-NUMBER", " 54278 "],
+    companyName: " vogue tailors ",
+  }, guarded);
+  assert.equal(pending.created, 0);
+  assert.equal(pending.duplicateLabels?.length, 1);
+  assert.equal(dbModule.listOrders().length, 1, "cancel leaves all orders unchanged");
+  assert.deepEqual(dbModule.listOrderEvents(), beforePrompt);
+
+  const second = dbModule.createOrders(orderInput("entry-b", "2026-08-03", 3), {
+    ...guarded,
+    confirmDuplicates: true,
+  });
   assert.equal(second.created, 1);
   assert.equal(second.reused.length, 1);
   assert.equal(second.reused[0].total, 2);
+  assert.equal(
+    dbModule.createOrders(orderInput("entry-b", "2026-08-03", 3), guarded).alreadySubmitted,
+    true,
+    "confirmed submission retries must not create another order or prompt again",
+  );
 
   let orders = dbModule
     .listOrders()
@@ -187,6 +208,24 @@ try {
       ?.deliveries.length,
     1,
   );
+
+  const otherCompany = dbModule.createOrders({
+    ...orderInput("entry-other-company", "2026-08-07", 1),
+    companyName: "Another Company",
+  }, guarded);
+  assert.equal(otherCompany.created, 1, "different companies can use the same number");
+  assert.equal(otherCompany.duplicateLabels, undefined);
+
+  const batchInput = {
+    ...orderInput("entry-batch", "2026-08-08", 1),
+    codes: ["NEW-BATCH-NUMBER", "54278"],
+  };
+  assert.ok(dbModule.createOrders(batchInput, guarded).duplicateLabels?.length);
+  assert.equal(dbModule.listOrders().length, 6);
+  assert.equal(dbModule.createOrders(batchInput, {
+    ...guarded,
+    confirmDuplicates: true,
+  }).created, 2, "confirmation saves the whole batch with the original submission key");
 
   dbModule.closeDatabaseForMigration();
   const database = new Database(dbPath, { fileMustExist: true, readonly: true });

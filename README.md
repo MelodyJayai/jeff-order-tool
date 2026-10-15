@@ -295,7 +295,7 @@ npm run package:installer
 release-installers/JeffOrderToolSetup-v版本号.exe
 ```
 
-当前建议给 Jeff 发送 `release-installers/JeffOrderToolSetup-v0.1.29.exe`。该版本在稳定内部ID和同号订单支持的基础上，进一步统一未完成订单、剩余未交和原登记数量的界面口径，并明确标记旧记录中未注明品类的已交数量。
+当前建议给 Jeff 发送 `release-installers/JeffOrderToolSetup-v0.1.30.exe`。该版本在 v0.1.29 的基础上，手工登记遇到同一公司已有的订单号时，保存前先弹窗确认；取消不写入并保留填写内容，确认后才登记为独立新订单。数据库结构与 v0.1.29 相同。
 
 安装包默认安装到当前 Windows 用户目录：
 
