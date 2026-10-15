@@ -51,7 +51,8 @@ $taskNames = @(
   "JeffOrderToolCloudTrialServer",
   "JeffOrderToolCloudTrialNamedTunnel",
   "JeffOrderToolCloudTrialTunnel",
-  "JeffOrderToolCloudTrialDailyBackup"
+  "JeffOrderToolCloudTrialDailyBackup",
+  "JeffOrderToolCloudTrialWatchdog"
 )
 $tasks = foreach ($taskName in $taskNames) {
   $task = Get-ScheduledTask -TaskName $taskName
@@ -69,6 +70,24 @@ $latestBackup = Get-ChildItem -LiteralPath (Join-Path $root "data\backups") -Fil
   Sort-Object LastWriteTime -Descending |
   Select-Object -First 1
 
+# 看门狗在一切健康时不写日志，所以 watchdog.log 里有内容就代表期间发生过真实异常。
+$watchdogLogPath = Join-Path $root "logs\watchdog.log"
+# 必须转成纯 [string[]]。Get-Content 返回的字符串携带 PSPath 等附加属性，
+# 直接交给 ConvertTo-Json 会把它们全部展开，输出膨胀到上百 KB。
+$watchdogEvents = [string[]]@()
+if (Test-Path -LiteralPath $watchdogLogPath) {
+  $watchdogEvents = [string[]]@(Get-Content -LiteralPath $watchdogLogPath -Tail 5)
+}
+
+$watchdogStatePath = Join-Path $root "logs\watchdog-state.json"
+$watchdogState = $null
+if (Test-Path -LiteralPath $watchdogStatePath) {
+  try {
+    $watchdogState = Get-Content -LiteralPath $watchdogStatePath -Raw | ConvertFrom-Json
+  } catch {
+  }
+}
+
 [pscustomobject]@{
   InstallRoot = $root
   PublicUrl = $publicUrl
@@ -78,4 +97,7 @@ $latestBackup = Get-ChildItem -LiteralPath (Join-Path $root "data\backups") -Fil
   Database = Join-Path $root "data\orders.db"
   LatestBackup = if ($latestBackup) { $latestBackup.FullName } else { $null }
   Tasks = $tasks
+  WatchdogLastCheckedAt = if ($watchdogState) { $watchdogState.lastCheckedAt } else { $null }
+  WatchdogRecentEventCount = $watchdogEvents.Count
+  WatchdogRecentEvents = $watchdogEvents
 } | ConvertTo-Json -Depth 4
