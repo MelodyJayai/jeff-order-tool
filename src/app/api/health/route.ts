@@ -14,6 +14,7 @@ export async function GET() {
     version: getCurrentVersion(),
     instanceId: getAppInstanceId(),
     schemaVersion: database.schemaVersion,
+    capabilities: { orderDeletionSync: 1 },
     checkedAt: new Date().toISOString(),
   });
 }

@@ -103,7 +103,7 @@ const DB_PATH = process.env.JEFF_ORDER_DB_PATH
 const BACKUP_DIR = process.env.JEFF_BACKUP_DIR
   ? path.resolve(process.env.JEFF_BACKUP_DIR)
   : path.join(path.dirname(DB_PATH), "backups");
-const SCHEMA_VERSION = "2026-08-03-v8-reusable-order-codes";
+const SCHEMA_VERSION = "2026-10-21-v9-order-delete-tombstones";
 
 function productValues(input: Record<ProductQuantityKey, number>) {
   return {
@@ -565,6 +565,18 @@ export function ensureDatabaseSchema(db: Database.Database) {
       submission_key TEXT PRIMARY KEY,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS order_deletions (
+      order_id TEXT PRIMARY KEY,
+      code TEXT NOT NULL,
+      company_name TEXT,
+      expected_updated_at TEXT NOT NULL,
+      expected_hash TEXT NOT NULL,
+      deleted_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_order_deletions_deleted_at
+      ON order_deletions(deleted_at);
   `);
 
   const ordersTable = db
@@ -750,6 +762,7 @@ export function ensureDatabaseSchema(db: Database.Database) {
   recordMigration(db, "2026-07-11-v6-order-deliveries");
   recordMigration(db, "2026-07-14-v7-delivery-requests");
   recordMigration(db, "2026-08-03-v8-reusable-order-codes");
+  recordMigration(db, "2026-10-21-v9-order-delete-tombstones");
   setMeta(db, "schema_version", SCHEMA_VERSION);
   setMeta(db, "app_name", "jeff-order-tool");
 }
@@ -1118,9 +1131,10 @@ export function getDatabaseChangeToken() {
   const events = db
     .prepare("SELECT id, order_id, created_at FROM order_events ORDER BY id")
     .all();
+  const deletions = db.prepare("SELECT * FROM order_deletions ORDER BY order_id").all();
 
   return createHash("sha256")
-    .update(JSON.stringify({ orders, deliveries, events }), "utf8")
+    .update(JSON.stringify({ orders, deliveries, events, deletions }), "utf8")
     .digest("hex");
 }
 
@@ -2111,6 +2125,53 @@ export function removeOrderDelivery(orderId: string, deliveryId: string) {
   })();
 
   return "removed" as const;
+}
+
+export function orderContentHash(db: Database.Database, id: string) {
+  const clean = (row: Record<string, unknown>, ignored: string[]) =>
+    Object.fromEntries(Object.keys(row).filter((key) => !ignored.includes(key)).sort()
+      .map((key) => [key, row[key] ?? null]));
+  const row = db.prepare("SELECT * FROM orders WHERE id = ?").get(id) as
+    Record<string, unknown> | undefined;
+  if (!row) return null;
+  const deliveries = db.prepare(
+    "SELECT * FROM order_deliveries WHERE order_id = ? ORDER BY delivered_at, created_at, id",
+  ).all(id) as Array<Record<string, unknown>>;
+  const events = db.prepare(
+    "SELECT * FROM order_events WHERE order_id = ? ORDER BY created_at, id",
+  ).all(id) as Array<Record<string, unknown>>;
+  return createHash("sha256").update(JSON.stringify({
+    order: clean(row, ["id", "created_at", "updated_at"]),
+    deliveries: deliveries.map((item) => clean(item, ["order_id"])),
+    events: events.map((item) => clean(item, ["order_id"])),
+  })).digest("hex");
+}
+
+export function deleteOrder(id: string, expectedUpdatedAt?: string) {
+  const db = getDb();
+  const outcome = db.transaction(() => {
+    const current = getOrder(id);
+    if (!current) return "missing" as const;
+    if (current.status === "WRITTEN_OFF" || current.status === "RETURNED") {
+      return "closed" as const;
+    }
+    if (current.deliveries.length > 0 || current.status !== "PENDING") {
+      return "has_activity" as const;
+    }
+    if (expectedUpdatedAt && current.updatedAt !== expectedUpdatedAt) {
+      return "conflict" as const;
+    }
+    db.prepare(`INSERT INTO order_deletions
+      (order_id, code, company_name, expected_updated_at, expected_hash, deleted_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      id, current.code, current.companyName, current.updatedAt, orderContentHash(db, id), nowIso(),
+    );
+    const removed = db.prepare("DELETE FROM orders WHERE id = ?").run(id);
+    if (removed.changes !== 1) throw new Error("订单删除失败，请刷新后重试");
+    return "deleted" as const;
+  }).immediate();
+  if (outcome === "deleted") scheduleLocalCloudSync();
+  return outcome;
 }
 
 export function writeOffOrder(

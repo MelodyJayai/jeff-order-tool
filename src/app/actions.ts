@@ -20,6 +20,7 @@ import {
   addOrderDelivery,
   createDatabaseBackupFile,
   createOrders,
+  deleteOrder,
   getDataDirectory,
   importOrders,
   importOrdersFromSqliteBackup,
@@ -40,6 +41,7 @@ import {
   urgencyLabels,
 } from "@/lib/types";
 import { getMigrationMaintenance } from "@/lib/maintenance";
+import { orderDeletionSyncBlockedReason } from "@/lib/local-cloud-sync";
 import { checkForUpdates } from "@/lib/update";
 
 const urgencySchema = z.enum(URGENCY_LEVELS);
@@ -574,6 +576,46 @@ export async function updateOrderAction(
   }
 
   return result(false, "记录不存在");
+}
+
+export async function deleteOrderAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const blocked = await mutationBlockedResult();
+  if (blocked) return blocked;
+
+  const id = text(formData, "id");
+  if (!id) return result(false, "没有找到这条记录");
+
+  const expectedUpdatedAt = text(formData, "expectedUpdatedAt");
+  if (!expectedUpdatedAt) {
+    return result(false, "未能核对这条订单的最新内容。为避免误删，请刷新页面并重新选择订单后再试。");
+  }
+  const syncBlocked = await orderDeletionSyncBlockedReason();
+  if (syncBlocked) return result(false, syncBlocked);
+  const deleted = deleteOrder(id, expectedUpdatedAt);
+  revalidatePath("/");
+  revalidatePath("/events");
+
+  if (deleted === "deleted") {
+    return result(true, "误登记订单已删除，现在可以重新登记");
+  }
+  if (deleted === "conflict") {
+    return result(false, "这条订单在你查看后又被修改过。为避免删除别人刚保存的内容，本次没有删除；请刷新页面，核对订单后再操作。");
+  }
+  if (deleted === "has_activity") {
+    return result(
+      false,
+      "这条订单已有实际交货记录或其他业务变化；删除会影响剩余数量和出货记录，因此不能删除。",
+    );
+  }
+  if (deleted === "closed") {
+    return result(
+      false,
+      "这条订单已经核销或正在返厂处理；删除会影响正常业务记录，因此不能删除。",
+    );
+  }
+  return result(false, "没有找到这条订单，可能已经被删除或数据已更新；请刷新后再操作。");
 }
 
 export async function updateOrderDeliveryRequestAction(

@@ -150,6 +150,11 @@ function ConflictChoices({ preview }: { preview: MigrationPreview }) {
             <div className="mt-1 text-xs leading-5 text-zinc-600">
               本地 {diff.sourceUpdatedAt ? formatDateTime(diff.sourceUpdatedAt) : "无时间"} · 云端 {diff.cloudUpdatedAt ? formatDateTime(diff.cloudUpdatedAt) : "无时间"}
             </div>
+            {diff.deletionConflict ? (
+              <div className="mt-1 text-xs text-red-800">
+                本地已删除这笔误登记，但云端内容已有变化。为保护正常业务记录，请保留云端并核对；不能用本地删除覆盖变化后的订单。
+              </div>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
             <label className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-medium">
@@ -158,6 +163,7 @@ function ConflictChoices({ preview }: { preview: MigrationPreview }) {
                 name={`resolution-${diff.id}`}
                 value="source"
                 required
+                disabled={diff.deletionConflict}
               />
               采用本地
             </label>

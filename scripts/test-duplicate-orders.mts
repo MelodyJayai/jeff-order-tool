@@ -74,6 +74,15 @@ try {
     "confirmed submission retries must not create another order or prompt again",
   );
 
+  const disposable = dbModule.createOrders({
+    ...orderInput("disposable", "2026-08-03", 1),
+    codes: ["DELETE-ME"],
+  }, guarded);
+  const deletable = dbModule.listOrders().find((order) => order.code === "DELETE-ME")!;
+  assert.equal(dbModule.deleteOrder(deletable.id), "deleted");
+  assert.equal(dbModule.listOrders().some((order) => order.id === deletable.id), false);
+  assert.equal(disposable.created, 1);
+
   let orders = dbModule
     .listOrders()
     .filter(
@@ -115,7 +124,9 @@ try {
     }),
     "added",
   );
+  assert.equal(dbModule.deleteOrder(newer.id), "has_activity");
   assert.equal(dbModule.writeOffOrder(older.id, "2026-08-03"), "updated");
+  assert.equal(dbModule.deleteOrder(older.id), "closed");
 
   orders = dbModule
     .listOrders()

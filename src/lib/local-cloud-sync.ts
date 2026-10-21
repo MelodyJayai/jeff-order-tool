@@ -119,6 +119,24 @@ function writeConfig(config: LocalCloudSyncConfig) {
   }
 }
 
+export async function orderDeletionSyncBlockedReason(): Promise<string | null> {
+  const config = readConfig();
+  if (!config || isCloudDeployment()) return null;
+  try {
+    const response = await fetch(`${config.serverUrl}/api/health`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    });
+    const health = await response.json() as {
+      capabilities?: { orderDeletionSync?: number };
+    };
+    if (response.ok && health.capabilities?.orderDeletionSync === 1) return null;
+    return "云端还没有更新到支持删除同步的版本。为避免电脑删掉后手机仍显示旧订单，本次没有删除；请先由维护人员更新云端。";
+  } catch {
+    return "暂时无法连接云端核对删除同步功能。为避免电脑与手机的订单不一致，本次没有删除；请联网后重试。";
+  }
+}
+
 function dpapiCommand(mode: "protect" | "unprotect") {
   const transform =
     mode === "protect"

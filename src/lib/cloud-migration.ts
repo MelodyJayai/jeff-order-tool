@@ -47,6 +47,7 @@ export type MigrationOrderDiff = {
   cloudHash: string | null;
   sourceUpdatedAt: string | null;
   cloudUpdatedAt: string | null;
+  deletionConflict?: boolean;
 };
 
 export type MigrationPreview = {
@@ -82,6 +83,7 @@ export type MigrationReport = {
   updatedFromSource: number;
   keptCloud: number;
   conflictsResolved: number;
+  deleted?: number;
   integrity: string;
   rolledBackAt?: string;
   rollbackBackupFilename?: string;
@@ -100,6 +102,15 @@ type OrderSnapshot = {
   companyName: string;
   updatedAt: string;
   hash: string;
+  canDelete: boolean;
+  deletion?: {
+    order_id: string;
+    code: string;
+    company_name: string;
+    expected_updated_at: string;
+    expected_hash: string;
+    deleted_at: string;
+  };
 };
 
 type MigrationBaseline = {
@@ -287,7 +298,28 @@ function orderSnapshots(db: Database.Database) {
       companyName,
       updatedAt: String(order.updated_at ?? ""),
       hash,
+      canDelete: order.status === "PENDING" && !(deliveriesByOrder.get(id)?.length),
     });
+  }
+
+  if (tableExists(db, "order_deletions")) {
+    const deletions = db.prepare("SELECT * FROM order_deletions ORDER BY order_id").all() as
+      Array<NonNullable<OrderSnapshot["deletion"]>>;
+    for (const deletion of deletions) {
+      const key = identityKey(deletion.order_id);
+      if (snapshots.has(key)) throw new Error("同一订单同时存在登记和删除记录，请先核对数据库");
+      snapshots.set(key, {
+        id: deletion.order_id,
+        key,
+        businessKey: normalizedKey(deletion.company_name ?? "", deletion.code),
+        code: deletion.code,
+        companyName: deletion.company_name ?? "",
+        updatedAt: deletion.deleted_at,
+        hash: hashBuffer(JSON.stringify(deletion)),
+        canDelete: false,
+        deletion,
+      });
+    }
   }
 
   return snapshots;
@@ -296,6 +328,7 @@ function orderSnapshots(db: Database.Database) {
 function groupSnapshotsByBusiness(snapshots: Map<string, OrderSnapshot>) {
   const groups = new Map<string, OrderSnapshot[]>();
   for (const snapshot of snapshots.values()) {
+    if (snapshot.deletion) continue;
     const existing = groups.get(snapshot.businessKey) ?? [];
     existing.push(snapshot);
     groups.set(snapshot.businessKey, existing);
@@ -354,7 +387,7 @@ function databaseFingerprint(snapshots: Map<string, OrderSnapshot>) {
     JSON.stringify(
       [...snapshots.values()]
         .sort((a, b) => a.key.localeCompare(b.key))
-        .map((item) => [item.key, item.hash]),
+        .map((item) => [item.key, item.hash, item.updatedAt]),
     ),
   );
 }
@@ -462,6 +495,14 @@ function classifyDifference(
   cloud: OrderSnapshot | undefined,
   baseline: MigrationBaseline | undefined,
 ): MigrationDiffCategory {
+  // A cloud deletion always wins over a stale desktop snapshot of that ID.
+  if (cloud?.deletion) return source?.deletion ? "identical" : "cloud_changed";
+  if (source?.deletion && cloud) {
+    return cloud.canDelete &&
+      source.deletion.expected_hash === cloud.hash &&
+      source.deletion.expected_updated_at === cloud.updatedAt
+      ? "local_changed" : "conflict";
+  }
   if (source && !cloud) {
     return "source_only";
   }
@@ -531,6 +572,7 @@ function buildDiffs(sourceDb: Database.Database, cloudDb: Database.Database) {
       cloudHash: cloud?.hash ?? null,
       sourceUpdatedAt: source?.updatedAt || null,
       cloudUpdatedAt: cloud?.updatedAt || null,
+      deletionConflict: category === "conflict" && Boolean(source?.deletion),
     });
   }
 
@@ -728,6 +770,20 @@ function replaceOrderFromSource(
   source: OrderSnapshot,
   cloud: OrderSnapshot | undefined,
 ) {
+  if (source.deletion) {
+    if (cloud && (!cloud.canDelete ||
+      source.deletion.expected_hash !== cloud.hash ||
+      source.deletion.expected_updated_at !== cloud.updatedAt)) {
+      throw new Error("云端订单在删除前已发生变化，不能删除；请保留云端并核对订单");
+    }
+    if (cloud) cloudDb.prepare("DELETE FROM orders WHERE id = ?").run(cloud.id);
+    const deletion = source.deletion;
+    cloudDb.prepare(`INSERT OR IGNORE INTO order_deletions
+      (order_id, code, company_name, expected_updated_at, expected_hash, deleted_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(deletion.order_id, deletion.code,
+        deletion.company_name, deletion.expected_updated_at, deletion.expected_hash, deletion.deleted_at);
+    return;
+  }
   const sourceRow = sourceDb
     .prepare("SELECT * FROM orders WHERE id = ?")
     .get(source.id) as Record<string, unknown> | undefined;
@@ -931,10 +987,15 @@ export async function applyMigration(
     let updatedFromSource = 0;
     let keptCloud = 0;
     let conflictsResolved = 0;
+    let deleted = 0;
 
     closeDatabaseForMigration();
 
     if (mode === "replace") {
+      if ([...comparison.cloudSnapshots.values()].some((order) =>
+        order.deletion && !comparison.sourceSnapshots.get(order.key)?.deletion)) {
+        throw new Error("这份备份早于云端已有的删除记录，完整替换会恢复误登记订单；请改用安全合并");
+      }
       const swapPath = path.join(
         getDataDirectory(),
         `.orders-migration-${reportId}.db`,
@@ -997,7 +1058,9 @@ export async function applyMigration(
 
             if (sourceChosen && sourceOrder) {
               replaceOrderFromSource(source, cloud, sourceOrder, cloudOrder);
-              if (cloudOrder) {
+              if (sourceOrder.deletion) {
+                if (cloudOrder) deleted += 1;
+              } else if (cloudOrder) {
                 updatedFromSource += 1;
               } else {
                 created += 1;
@@ -1050,6 +1113,7 @@ export async function applyMigration(
         updatedFromSource,
         keptCloud,
         conflictsResolved,
+        deleted,
         integrity,
       };
       saveBaselines(finalCloud, finalSource, reportId);

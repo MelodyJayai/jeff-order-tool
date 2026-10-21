@@ -27,6 +27,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   addOrderDeliveryAction,
   createOrdersAction,
+  deleteOrderAction,
   importCsvAction,
   importSqliteBackupAction,
   installUpdateAction,
@@ -185,6 +186,61 @@ const eventLabels = {
   RETURN_RESOLVED: "完成返厂",
   UNDO_WRITTEN_OFF: "撤销核销",
 } as const;
+
+function DeleteOrderForm({
+  order,
+  busy,
+  writeProtected,
+  onSubmit,
+}: {
+  order: OrderRecord;
+  busy: string | null;
+  writeProtected: boolean;
+  onSubmit: SubmitHandler;
+}) {
+  const blockedReason = writeProtected
+    ? "这里是云端只读页面，不能删除订单。请在办公室电脑的订单工具中删除误登记记录。"
+    : order.status === "WRITTEN_OFF"
+      ? "这条订单已经出货核销。删除会让已完成的出货记录丢失，因此不能直接删除；请先核对原订单。"
+      : order.status === "RETURNED"
+        ? "这条订单正在返厂处理。删除会丢失返厂记录，因此不能直接删除；请先核对原订单。"
+        : order.deliveries.length > 0 || order.status !== "PENDING"
+          ? "这条订单已有实际交货记录。删除会让已交数量和剩余未交数量失去依据，因此不能直接删除。"
+          : null;
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (blockedReason) {
+          window.alert(blockedReason);
+          return;
+        }
+        if (
+          !window.confirm(
+            `请核对要删除的这一笔订单：\n公司：${order.companyName || "未选公司"}\n订单号：${order.code}\n登记日期：${order.registeredAt}\n数量：${orderQuantity(order)} 件\n\n删除后，这一笔登记及其客户先交要求会被移除，订单总数和待交数量也会减少，无法在页面上撤销。只有登记错误时才应删除。\n\n确认删除这一笔订单吗？`,
+          )
+        ) return;
+        onSubmit(event, deleteOrderAction, "删除");
+      }}
+      className="grid gap-1"
+    >
+      <input type="hidden" name="id" value={order.id} />
+      <input type="hidden" name="expectedUpdatedAt" value={order.updatedAt} />
+      <button
+        type="submit"
+        disabled={Boolean(busy)}
+        className="inline-flex h-10 items-center justify-center rounded-md border border-red-300 bg-white px-3 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:text-red-300"
+        title={blockedReason ? "查看不能删除的原因" : "删除误登记订单"}
+      >
+        {busy === "删除" ? "删除中" : "删除误登记订单"}
+      </button>
+      {blockedReason ? (
+        <span className="text-xs text-zinc-500">当前不能删除，点击查看原因</span>
+      ) : null}
+    </form>
+  );
+}
 
 const deliveryQuantityKeys = {
   suitQuantity: "deliverySuitQuantity",
@@ -2006,6 +2062,9 @@ export function Workbench({
         actionResult = await action(formData);
       }
       setNotice(actionResult);
+      if (!actionResult.ok) {
+        window.alert(actionResult.message);
+      }
       onResult?.(actionResult);
 
       if (actionResult.ok && reset) {
@@ -2587,6 +2646,14 @@ export function Workbench({
                       <Badge className={actualDeliveryTone}>已实际先交</Badge>
                     ) : null}
                   </div>
+                ) : null}
+                {selected ? (
+                  <DeleteOrderForm
+                    order={selected}
+                    busy={busy}
+                    writeProtected={writeProtected}
+                    onSubmit={submit}
+                  />
                 ) : null}
               </div>
 

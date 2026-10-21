@@ -35,15 +35,16 @@ function completedMessage(input: {
   created: number;
   updatedFromSource: number;
   keptCloud: number;
+  deleted?: number;
 }) {
-  const changed = input.created + input.updatedFromSource;
+  const changed = input.created + input.updatedFromSource + (input.deleted ?? 0);
   if (changed === 0) {
     return input.keptCloud > 0
       ? `云端已是最新，并保留 ${input.keptCloud} 条云端记录`
       : "云端数据已经是最新";
   }
 
-  return `已同步到云端：新增 ${input.created} 条，更新 ${input.updatedFromSource} 条`;
+  return `已同步到云端：新增 ${input.created} 条，更新 ${input.updatedFromSource} 条${input.deleted ? `，删除误登记 ${input.deleted} 条` : ""}`;
 }
 
 export async function processCloudSyncUpload(input: {
