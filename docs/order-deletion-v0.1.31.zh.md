@@ -48,4 +48,11 @@ OCI 当前维护路径为 `/home/ubuntu/jeff-order/docker-compose.yml`，镜像�
 - `npm run test:order-deletion-ui`：独立临时数据库和独立 Edge 无头配置目录，验证电脑/手机入口、交货/核销/只读原因弹窗、取消、过期提交拒绝、确认仅删选中 ID。
 - 从打包目录使用自带 Node 启动 standalone 服务，版本和删除同步能力检查通过。
 
-本文件记录的是已构建、已验证的本地交付候选；截至本次处理尚未发布 v0.1.31、更新 OCI，或远程安装 Jeff 电脑。
+## 已发布与线上核验（2026-10-21）
+
+- GitHub Release `v0.1.31` 已正式公开，包含 Windows 安装包、7z 更新包和 SHA-256 清单。
+- OCI 已更新到固定镜像 `ghcr.io/melodyjayai/jeff-order-tool:0.1.31`，容器健康检查通过。
+- 公网 `/api/health` 已返回版本 `0.1.31`、schema `2026-10-21-v9-order-delete-tombstones` 和 `capabilities.orderDeletionSync: 1`；云端仍保持只读模式。
+- 更新前已用容器内 SQLite backup 完成在线备份，备份目录为 `/app/data/pre-release-v0.1.31`；备份完整性检查通过。
+- 订单、交货和事件数据的数量及内容哈希与更新前一致（订单 1,280 笔），SQLite `integrity_check` 通过且无外键违规。
+- Jeff 仍需在办公室电脑打开“软件更新”，或下载 v0.1.31 安装包覆盖安装；重启电脑本身不会升级程序。
