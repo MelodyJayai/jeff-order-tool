@@ -112,6 +112,20 @@ export type OrderEventRecord = {
   createdAt: string;
 };
 
+export type MonthlyOrderStatistics = {
+  month: string;
+  orderCount: number;
+  quantity: number;
+  pendingOrders: number;
+  pendingQuantity: number;
+  partialOrders: number;
+  partialQuantity: number;
+  returnedOrders: number;
+  returnedQuantity: number;
+  writtenOffOrders: number;
+  writtenOffQuantity: number;
+};
+
 export type CreateOrdersInput = {
   submissionKey?: string;
   codes: string[];
@@ -151,6 +165,7 @@ export type ImportOrderInput = CreateOrdersInput & {
 
 export type UpdateOrderInput = {
   id: string;
+  expectedUpdatedAt?: string;
   companyName: string;
   factoryName: string;
   quantity: number;

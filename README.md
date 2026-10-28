@@ -295,7 +295,7 @@ npm run package:installer
 release-installers/JeffOrderToolSetup-v版本号.exe
 ```
 
-当前建议给 Jeff 发送 `release-installers/JeffOrderToolSetup-v0.1.30.exe`。该版本在 v0.1.29 的基础上，手工登记遇到同一公司已有的订单号时，保存前先弹窗确认；取消不写入并保留填写内容，确认后才登记为独立新订单。数据库结构与 v0.1.29 相同。
+当前桌面安装包版本为 `release-installers/JeffOrderToolSetup-v0.1.32.exe`。手工登记遇到同一公司已有的订单号时，保存前先弹窗确认；取消不写入并保留填写内容，确认后才登记为独立新订单。按月份统计和同一订单被另一台设备更新时的保护也已加入。
 
 安装包默认安装到当前 Windows 用户目录：
 
@@ -355,9 +355,9 @@ JEFF_UPDATE_MANIFEST_URL=https://example.com/jeff-order-tool/update.json
 
 ## 两台电脑使用
 
-两台电脑不要分别运行两套 `JeffOrderTool`，否则会变成两份数据。
+两台电脑不要分别把各自的本地数据库当成主库，否则会变成两份数据。
 
-推荐方式：
+如果使用本地版，推荐方式：
 
 1. 固定一台办公室电脑作为主机，双击打开工具。
 2. 另一台电脑连接同一个 Wi-Fi 或局域网。
@@ -365,6 +365,10 @@ JEFF_UPDATE_MANIFEST_URL=https://example.com/jeff-order-tool/update.json
 4. 另一台电脑用 Edge 打开这个地址。
 
 这样两台电脑登记、查询、核销的都是主机上的同一份订单总表。
+
+如果要让两台电脑在不同地点同时操作，请使用已经部署好的云端网址：两台电脑都打开同一个网址并登录，登记、修改、核销和月份统计都会读写同一份云端订单总表。云端共享编辑模式会在同一订单刚被另一台设备修改时拒绝过期保存，提示刷新后再核对，避免覆盖正常订单。
+
+首页“月份统计”可以按登记月份查看订单笔数、登记数量总计、状态汇总和该月订单明细。
 
 ## 数据文件
 

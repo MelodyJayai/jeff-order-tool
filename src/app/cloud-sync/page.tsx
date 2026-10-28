@@ -103,12 +103,12 @@ export default async function CloudSyncPage({
           <div className="font-semibold">
             {isCloudWriteProtected()
               ? "当前为过渡期只读模式"
-              : "当前允许直接修改云端订单"}
+              : "当前为多设备共享编辑模式"}
           </div>
           <div className="mt-1 leading-6">
             {isCloudWriteProtected()
               ? "Jeff 在本地电脑录入，云端供手机查询并接收安全同步。"
-              : "两端同时修改同一张订单可能产生冲突；正式切换前建议启用 JEFF_CLOUD_SYNC_READ_ONLY=true。"}
+              : "两台电脑请打开同一个云端网址，登记、修改和核销会写入同一份云端订单总表。同一订单被另一台设备刚修改时，页面会要求刷新后再保存。"}
           </div>
         </section>
 

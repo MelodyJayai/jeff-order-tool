@@ -4,6 +4,7 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
+  BarChart3,
   CheckCircle2,
   Clock3,
   Copy,
@@ -1252,6 +1253,14 @@ function ImportBackupCard({
       </div>
       <div className="grid gap-3 p-4">
         <a
+          href="/statistics"
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-4 text-sm font-medium text-blue-900 transition hover:bg-blue-100"
+        >
+          <BarChart3 className="h-4 w-4" aria-hidden="true" />
+          按月份查询登记数量
+          <ArrowRight className="h-4 w-4" aria-hidden="true" />
+        </a>
+        <a
           href="/api/backup"
           className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-medium text-zinc-900 transition hover:bg-zinc-50"
         >
@@ -2215,6 +2224,14 @@ export function Workbench({
               <Activity className="h-4 w-4" aria-hidden="true" />
               检查
             </a>
+            <a
+              href="/statistics"
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
+              title="按月份查询登记数量"
+            >
+              <BarChart3 className="h-4 w-4" aria-hidden="true" />
+              月份统计
+            </a>
             <button
               type="button"
               onClick={exportCsv}
@@ -2367,13 +2384,19 @@ export function Workbench({
           <div className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-900">
             {writeProtected
               ? "云端同步试用：手机当前只用于查订单，登记和核销仍在办公室电脑操作。"
-              : "手机模式：搜索订单，点“出货核销”；登记和修改在办公室电脑操作。"}
+              : "共享云端模式：本设备可登记、修改和核销；如果另一台设备刚改过同一订单，系统会拒绝覆盖并提示刷新。"}
           </div>
         ) : null}
 
         {writeProtected && !isPhoneMode ? (
           <div className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-900">
             云端同步试用：这里暂时只供查询，订单请继续在 Jeff 的办公室电脑登记和核销。
+          </div>
+        ) : null}
+
+        {cloudMode && !writeProtected && !isPhoneMode ? (
+          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900">
+            共享云端编辑已启用：Jeff 可以在两台电脑同时打开同一个网址登记、修改和核销，数据写入同一份云端订单总表。若另一台设备刚保存了同一订单，本次保存会被保护性拒绝，请刷新后再核对。
           </div>
         ) : null}
 
@@ -2706,6 +2729,11 @@ export function Workbench({
                     )}
                   >
                     <input type="hidden" name="id" value={selected.id} />
+                    <input
+                      type="hidden"
+                      name="expectedUpdatedAt"
+                      value={selected.updatedAt}
+                    />
                     <input type="hidden" name="quantity" value={selected.quantity} />
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1.25fr)_140px_120px]">
                       <Field label="公司">

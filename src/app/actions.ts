@@ -552,6 +552,7 @@ export async function updateOrderAction(
 
   const updated = updateOrder({
     id,
+    expectedUpdatedAt: text(formData, "expectedUpdatedAt") || undefined,
     companyName: text(formData, "companyName"),
     factoryName: text(formData, "factoryName"),
     quantity: positiveInt(formData, "quantity"),
@@ -573,6 +574,13 @@ export async function updateOrderAction(
 
   if (updated === "below_requested") {
     return result(false, "订单数量不能小于已经登记的客户先交要求");
+  }
+
+  if (updated === "conflict") {
+    return result(
+      false,
+      "这条订单刚刚被另一台设备修改过。为避免覆盖正常订单，本次没有保存；请刷新页面后核对最新内容再编辑。",
+    );
   }
 
   return result(false, "记录不存在");

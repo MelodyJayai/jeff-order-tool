@@ -19,6 +19,7 @@ import type {
   OrderDeliveryRecord,
   OrderEventType,
   OrderEventRecord,
+  MonthlyOrderStatistics,
   OrderRecord,
   OrderStatus,
   ReturnOrderInput,
@@ -902,14 +903,19 @@ function mapEvent(row: OrderEventRow): OrderEventRecord {
   };
 }
 
-export function listOrders() {
+export function listOrders(month?: string) {
   const db = getDb();
+  const monthFilter = month && /^\d{4}-\d{2}$/u.test(month) ? month : null;
   const rows = db
     .prepare(
-      `SELECT * FROM orders
-       ORDER BY updated_at DESC, created_at DESC`,
+      monthFilter
+        ? `SELECT * FROM orders
+           WHERE registered_at LIKE ?
+           ORDER BY updated_at DESC, created_at DESC`
+        : `SELECT * FROM orders
+           ORDER BY updated_at DESC, created_at DESC`,
     )
-    .all() as OrderRow[];
+    .all(...(monthFilter ? [`${monthFilter}-%`] : [])) as OrderRow[];
 
   const groupedDeliveries = new Map<string, OrderDeliveryRecord[]>();
 
@@ -921,6 +927,43 @@ export function listOrders() {
   }
 
   return rows.map((row) => mapOrder(row, groupedDeliveries.get(row.id) ?? []));
+}
+
+export function getMonthlyOrderStatistics(): MonthlyOrderStatistics[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT
+         substr(registered_at, 1, 7) AS month,
+         COUNT(*) AS order_count,
+         COALESCE(SUM(quantity), 0) AS quantity,
+         SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) AS pending_orders,
+         COALESCE(SUM(CASE WHEN status = 'PENDING' THEN quantity ELSE 0 END), 0) AS pending_quantity,
+         SUM(CASE WHEN status = 'PARTIAL' THEN 1 ELSE 0 END) AS partial_orders,
+         COALESCE(SUM(CASE WHEN status = 'PARTIAL' THEN quantity ELSE 0 END), 0) AS partial_quantity,
+         SUM(CASE WHEN status = 'RETURNED' THEN 1 ELSE 0 END) AS returned_orders,
+         COALESCE(SUM(CASE WHEN status = 'RETURNED' THEN quantity ELSE 0 END), 0) AS returned_quantity,
+         SUM(CASE WHEN status = 'WRITTEN_OFF' THEN 1 ELSE 0 END) AS written_off_orders,
+         COALESCE(SUM(CASE WHEN status = 'WRITTEN_OFF' THEN quantity ELSE 0 END), 0) AS written_off_quantity
+       FROM orders
+       WHERE registered_at IS NOT NULL AND trim(registered_at) <> ''
+       GROUP BY substr(registered_at, 1, 7)
+       ORDER BY month DESC`,
+    )
+    .all() as Array<Record<string, unknown>>;
+
+  return rows.map((row) => ({
+    month: String(row.month ?? ""),
+    orderCount: Number(row.order_count ?? 0),
+    quantity: Number(row.quantity ?? 0),
+    pendingOrders: Number(row.pending_orders ?? 0),
+    pendingQuantity: Number(row.pending_quantity ?? 0),
+    partialOrders: Number(row.partial_orders ?? 0),
+    partialQuantity: Number(row.partial_quantity ?? 0),
+    returnedOrders: Number(row.returned_orders ?? 0),
+    returnedQuantity: Number(row.returned_quantity ?? 0),
+    writtenOffOrders: Number(row.written_off_orders ?? 0),
+    writtenOffQuantity: Number(row.written_off_quantity ?? 0),
+  }));
 }
 
 export function getAppMeta(key: string) {
@@ -1865,6 +1908,10 @@ export function updateOrder(input: UpdateOrderInput) {
     return "missing" as const;
   }
 
+  if (input.expectedUpdatedAt && current.updatedAt !== input.expectedUpdatedAt) {
+    return "conflict" as const;
+  }
+
   const now = nowIso();
   const quantities = productValues(input);
   const quantity = totalQuantity(quantities, input.quantity);
@@ -1895,8 +1942,8 @@ export function updateOrder(input: UpdateOrderInput) {
         ? "PARTIAL"
         : "PENDING";
 
-  db.transaction(() => {
-    db.prepare(`
+  const outcome = db.transaction(() => {
+    const updateResult = db.prepare(`
       UPDATE orders
       SET company_name = @companyName,
           factory_name = @factoryName,
@@ -1912,8 +1959,10 @@ export function updateOrder(input: UpdateOrderInput) {
           note = @note,
           updated_at = @updatedAt
       WHERE id = @id
+        AND (@expectedUpdatedAt IS NULL OR updated_at = @expectedUpdatedAt)
     `).run({
       id: input.id,
+      expectedUpdatedAt: input.expectedUpdatedAt || null,
       companyName: input.companyName || null,
       factoryName: input.factoryName || null,
       quantity,
@@ -1924,15 +1973,19 @@ export function updateOrder(input: UpdateOrderInput) {
       note: input.note || null,
       updatedAt: now,
     });
+    if (updateResult.changes === 0) {
+      return "conflict" as const;
+    }
     insertEvent(
       db,
       input.id,
       "UPDATED",
       "更新订单信息",
     );
+    return "updated" as const;
   })();
 
-  return "updated" as const;
+  return outcome;
 }
 
 export function updateOrderDeliveryRequest(
